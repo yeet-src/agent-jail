@@ -1,4 +1,6 @@
-# omp-jail
+# agent-jail
+
+<sub>(the command, binary, and scripts are still named `omp-jail` — rename in progress)</sub>
 
 > **⚠️ Status: experimental (v0.x). Not yet production-hardened.**
 > The core confinement works and survives an adversarial breakout suite, but it
@@ -27,7 +29,7 @@ The enforcement is what protects you. The dashboard proves it's working, and
 turns "my AI agent is sandboxed" into something you can watch and screenshot.
 
 ```
- ● omp-jail  ⊟ JAILED   ▏  dir ~/project
+ ● agent-jail  ⊟ JAILED   ▏  dir ~/project
  ████████████░░░░░░░░░██  812 in-bounds  ▏  37 blocked  ▏  9.5K system  ▁▂▅▃▂ 41/s
  ⤳ escape attempts (outside the jail)            ◇ live file opens
   🔥 /etc/passwd            6×  blocked        · ./src/main.go        ok
@@ -40,7 +42,7 @@ turns "my AI agent is sandboxed" into something you can watch and screenshot.
 
 `omp` is a terminal coding agent: it reads your code, runs commands, and spawns
 subagents. That's useful — and it's also a process with your full filesystem
-permissions, driven by a model. `omp-jail` pins it to the project you're working
+permissions, driven by a model. `agent-jail` pins it to the project you're working
 in, so a stray read of `~/.ssh/id_rsa` or `~/.aws/credentials` is refused by the
 kernel rather than trusted to good behaviour.
 

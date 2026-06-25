@@ -25,7 +25,7 @@ export default ({ stats, mode, dir }) => (
             ? bold(fg(C.safe)(" ⊟ JAILED "))
             : bold(bg(C.leak)(fg(idx(231))(" ⚠ AUDIT · UNCONFINED ")));
           return [
-            bold(fg(C.brand)(" ▢ omp-jail")), fg(C.brandDim)(" ⌁ "), badge,
+            bold(fg(C.brand)(" ▢ agent-jail")), fg(C.brandDim)(" ⌁ "), badge,
             sep, fg(C.textDim)("confined to "), fg(C.text)(dir),
           ];
         }}

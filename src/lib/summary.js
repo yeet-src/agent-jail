@@ -6,7 +6,7 @@ import { tildify } from "@/lib/format.js";
 export function buildSummary(s, { dir, mode, home }) {
   const lines = [];
   const jailed = mode === "jail";
-  lines.push(`omp-jail session — ${jailed ? "JAILED (Landlock)" : "AUDIT (unconfined)"}`);
+  lines.push(`agent-jail session — ${jailed ? "JAILED (Landlock)" : "AUDIT (unconfined)"}`);
   lines.push(`dir: ${tildify(dir, home)}`);
   lines.push(
     `opens: ${s.total}  ·  in-bounds: ${s.allowed}  ·  ` +

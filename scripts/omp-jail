@@ -1,0 +1,88 @@
+#!/bin/sh
+# omp-jail — confine omp to one directory (Landlock) and watch it live (eBPF).
+#
+# One command, two halves working together:
+#   1. the yeet watcher (this project) attaches via eBPF, shows every file omp
+#      opens, flags escapes, and proves the jail held;
+#   2. the C Landlock launcher (bin/omp-jail-bin) locks omp to the directory and
+#      execs it.
+#
+# Usage:
+#   omp-jail [DIR] [-- omp-args...]      jail omp in DIR (default: cwd)
+#   omp-jail --audit [DIR]               run UNCONFINED, watch what would leak
+#   omp-jail --allow PATH [DIR]          also permit PATH (repeatable)
+#
+# The watcher runs in the foreground (it owns the TUI); omp runs underneath it.
+# Quit the watcher with q. omp keeps running until you exit it normally; the
+# watcher prints a copyable summary on quit.
+#
+# Requires: Linux >= 5.13 with Landlock, a BTF kernel for eBPF, root for the
+# probe (the watcher loads BPF). On macOS, run inside the Lima VM.
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+JAIL_BIN="$HERE/bin/omp-jail-bin"
+PROBE_OBJ="$HERE/bin/probe.bpf.o"
+
+MODE=jail
+ALLOW_ARGS=""
+DIR=""
+# Resolve omp to an absolute path now, while we still have the user's PATH.
+# The jail runs under sudo (for eBPF), whose PATH typically drops ~/.local/bin,
+# so a bare "omp" wouldn't be found post-elevation. command -v honours PATH and
+# the OMP override.
+OMP_NAME=${OMP:-omp}
+OMP=$(command -v "$OMP_NAME" 2>/dev/null || echo "$OMP_NAME")
+
+# --- parse our flags; everything after -- is passed to omp ---
+OMP_ARGS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --audit|--no-jail) MODE=audit; shift ;;
+    --allow) ALLOW_ARGS="$ALLOW_ARGS --allow $2"; shift 2 ;;
+    --) shift; OMP_ARGS="$*"; break ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -*) echo "omp-jail: unknown flag $1" >&2; exit 2 ;;
+    *) if [ -z "$DIR" ]; then DIR="$1"; shift; else OMP_ARGS="$*"; break; fi ;;
+  esac
+done
+[ -n "$DIR" ] || DIR=$(pwd)
+
+# Canonicalize so the watcher's prefix matches the jail's exactly.
+DIR=$(CDPATH= cd -- "$DIR" && pwd)
+HOME_ABS=${HOME:-}
+
+[ -f "$JAIL_BIN" ]  || { echo "omp-jail: $JAIL_BIN missing — run 'make' first" >&2; exit 1; }
+[ -f "$PROBE_OBJ" ] || { echo "omp-jail: $PROBE_OBJ missing — run 'make' first" >&2; exit 1; }
+
+# The launcher is what actually runs omp. In audit mode it skips Landlock so the
+# watcher can show what WOULD leak.
+if [ "$MODE" = audit ]; then
+  LAUNCH="$JAIL_BIN --no-jail $DIR -- $OMP $OMP_ARGS"
+else
+  LAUNCH="$JAIL_BIN $ALLOW_ARGS $DIR -- $OMP $OMP_ARGS"
+fi
+
+echo "omp-jail: $MODE — dir $DIR"
+echo "omp-jail: launching watcher (needs root for eBPF); omp starts underneath."
+
+# The watcher (yeet) can't spawn processes itself, so the wrapper starts omp
+# jailed in the background and runs the watcher in the foreground, filtering on
+# comm=omp under DIR. The BPF attaches as the watcher starts; a few of omp's
+# very first startup opens may land before then — fine for an interactive
+# agent, where the opens that matter happen during use, not in the first ms.
+#
+# Background omp, detached from the TUI's stdin so the watcher keeps the
+# keyboard. Its PID is recorded so we can stop it when the watcher quits.
+( eval "$LAUNCH" >/dev/null 2>&1 & echo $! > "$HERE/.omp.pid" ) || true
+
+# Foreground: the yeet watcher. It exits on 'q'; we then clean up omp.
+yeet run "$HERE" -- \
+  --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp || true
+
+# Watcher quit — stop the jailed omp if it's still running.
+if [ -f "$HERE/.omp.pid" ]; then
+  OMP_PID=$(cat "$HERE/.omp.pid" 2>/dev/null || true)
+  [ -n "${OMP_PID:-}" ] && kill "$OMP_PID" 2>/dev/null || true
+  rm -f "$HERE/.omp.pid"
+fi

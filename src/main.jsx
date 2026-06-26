@@ -55,32 +55,36 @@ function copySummary() {
 // shows a window starting here; it clamps internally, so we only need to keep a
 // non-negative number and let the view bound it. `pageRows` tracks the current
 // pane height so PgUp/PgDn move by a screenful.
-const scroll = signal(0);
+// Selected row in the escape list — a highlighted cursor the user moves with
+// ↑↓. The leaderboard derives its scroll window from this (keeps the selection
+// on screen), so the motion is visible: the highlight tracks each keypress even
+// before the list overflows. `selected` is an index into the escape list; the
+// view clamps it. `pageRows` tracks the live pane height for PgUp/PgDn.
+const selected = signal(0);
 let pageRows = 10;
 const escapeCount = () => stats.get().escapes.length;
-const maxScroll = () => Math.max(0, escapeCount() - pageRows);
-const scrollBy = (d) => scroll.set(Math.max(0, Math.min(maxScroll(), scroll.get() + d)));
+const clampSel = (i) => Math.max(0, Math.min(Math.max(0, escapeCount() - 1), i));
+const moveSel = (d) => selected.set(clampSel(selected.get() + d));
 
 tty.on("keydown", (e) => {
   const code = e.code;
   const k = (e.key ?? "").toLowerCase();
   if (code === "Escape" || k === "q") return yeet.exit();
   if (k === "c") return copySummary();
-  // Scroll the escape-attempts pane.
-  if (code === "ArrowUp" || k === "k") return scrollBy(-1);
-  if (code === "ArrowDown" || k === "j") return scrollBy(1);
-  if (code === "PageUp") return scrollBy(-pageRows);
-  if (code === "PageDown") return scrollBy(pageRows);
-  // g = top, G (shift+g) = bottom. Check the raw key for case.
-  if (e.key === "g") return scroll.set(0);
-  if (e.key === "G") return scroll.set(maxScroll());
+  // Move the highlighted selection through the escape list.
+  if (code === "ArrowUp" || k === "k") return moveSel(-1);
+  if (code === "ArrowDown" || k === "j") return moveSel(1);
+  if (code === "PageUp") return moveSel(-pageRows);
+  if (code === "PageDown") return moveSel(pageRows);
+  if (e.key === "g") return selected.set(0);                 // top
+  if (e.key === "G") return selected.set(clampSel(escapeCount() - 1)); // bottom
 });
 
 const panel = (p) => {
   switch (p.kind) {
     case "leaderboard":
       pageRows = p.maxRows; // keep PgUp/PgDn in sync with the live pane height
-      return <Leaderboard stats={stats} home={home} maxRows={p.maxRows} width={p.w} scroll={scroll} />;
+      return <Leaderboard stats={stats} home={home} maxRows={p.maxRows} width={p.w} selected={selected} />;
     case "feed":
       return <Feed stats={stats} home={home} maxRows={p.maxRows} width={p.w} />;
   }

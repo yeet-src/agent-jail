@@ -18,7 +18,20 @@ cd "$P" 2>/dev/null || true
 # In-bounds source the agent works with, and out-of-bounds targets it may wander
 # into (all blocked by the jail).
 SRC="src/index.ts src/api/router.ts src/components/Button.tsx src/components/Modal.tsx src/lib/format.ts src/lib/db.ts tests/format.test.ts package.json tsconfig.json README.md"
-OUT="$HOME/.ssh/id_rsa $HOME/.aws/credentials $HOME/.config/gh/hosts.yml /etc/passwd $HOME/.gitconfig $HOME/.bashrc"
+
+# A broad set of out-of-bounds targets a wandering agent might reach for. Many
+# distinct paths (not just a handful) so the escape leaderboard OVERFLOWS the
+# pane — that's what makes scrollback visible and worth demoing. All blocked.
+OUT="$HOME/.ssh/id_rsa $HOME/.ssh/id_ed25519 $HOME/.ssh/known_hosts $HOME/.ssh/config \
+$HOME/.aws/credentials $HOME/.aws/config \
+$HOME/.config/gh/hosts.yml $HOME/.config/gcloud/credentials.db \
+$HOME/.docker/config.json $HOME/.kube/config \
+$HOME/.netrc $HOME/.npmrc $HOME/.pypirc $HOME/.git-credentials \
+$HOME/.gitconfig $HOME/.bashrc $HOME/.zsh_history $HOME/.bash_history \
+$HOME/.config/google-chrome/Default/Cookies $HOME/.mozilla/firefox/profile/key4.db \
+/etc/passwd /etc/shadow /etc/hosts /etc/sudoers \
+/var/log/auth.log /proc/1/environ \
+$HOME/.env $HOME/secrets.txt $HOME/.config/op/config $HOME/.password-store/aws.gpg"
 
 tick=0
 pick() { h=$(( (tick * 2654435761 + 40503) % 2147483647 )); n=$(( h % $# )); i=0; for a in "$@"; do [ "$i" -eq "$n" ] && { echo "$a"; return; }; i=$((i+1)); done; }

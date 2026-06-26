@@ -1,10 +1,10 @@
 #!/bin/sh
 # adversary.sh — a jail-breakout test suite. Plays the role of a malicious agent
 # trying every filesystem-escape trick to read secrets outside its directory.
-# Run it JAILED (via omp-jail) and every attempt should fail; run it unjailed to
+# Run it JAILED (via agent-jail) and every attempt should fail; run it unjailed to
 # see the same attempts succeed (the baseline that proves the jail is doing work).
 #
-#   sudo omp-jail-bin DIR -- /bin/sh adversary.sh        # jailed: all should FAIL
+#   sudo agent-jail-bin DIR -- /bin/sh adversary.sh        # jailed: all should FAIL
 #   sh adversary.sh                                       # unjailed: many SUCCEED
 #
 # It targets real secret paths and reports, per technique, whether it got data
@@ -55,7 +55,7 @@ try "procfs-cwd" "/proc/self/cwd/../../../../etc/shadow"
 
 # 5) /proc/<pid>/environ and other process introspection. A process can ALWAYS
 #    read its own environment (Landlock can't wall a process off from itself),
-#    so the real question is whether anything SECRET is in it. omp-jail scrubs
+#    so the real question is whether anything SECRET is in it. agent-jail scrubs
 #    secret-bearing vars before exec, so this should find none.
 echo "[5] /proc pid introspection"
 try "proc-pid1-environ" "/proc/1/environ"

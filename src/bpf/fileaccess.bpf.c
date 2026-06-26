@@ -1,6 +1,6 @@
 // fileaccess — trace every file-open a jailed program attempts, classify it as
 // in-bounds or an escape, and capture the kernel's verdict (the open's return
-// value). This is the OBSERVABILITY half of omp-jail: it does not block
+// value). This is the OBSERVABILITY half of agent-jail: it does not block
 // anything (a tracepoint fires after the kernel already decided), it witnesses.
 //
 // The story it tells, per open:

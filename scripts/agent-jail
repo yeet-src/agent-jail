@@ -1,16 +1,16 @@
 #!/bin/sh
-# omp-jail — confine omp to one directory (Landlock) and watch it live (eBPF).
+# agent-jail — confine omp to one directory (Landlock) and watch it live (eBPF).
 #
 # One command, two halves working together:
 #   1. the yeet watcher (this project) attaches via eBPF, shows every file omp
 #      opens, flags escapes, and proves the jail held;
-#   2. the C Landlock launcher (bin/omp-jail-bin) locks omp to the directory and
+#   2. the C Landlock launcher (bin/agent-jail-bin) locks omp to the directory and
 #      execs it.
 #
 # Usage:
-#   omp-jail [DIR] [-- omp-args...]      jail omp in DIR (default: cwd)
-#   omp-jail --audit [DIR]               run UNCONFINED, watch what would leak
-#   omp-jail --allow PATH [DIR]          also permit PATH (repeatable)
+#   agent-jail [DIR] [-- omp-args...]      jail omp in DIR (default: cwd)
+#   agent-jail --audit [DIR]               run UNCONFINED, watch what would leak
+#   agent-jail --allow PATH [DIR]          also permit PATH (repeatable)
 #
 # The watcher runs in the foreground (it owns the TUI); omp runs underneath it.
 # Quit the watcher with q. omp keeps running until you exit it normally; the
@@ -21,7 +21,7 @@
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-JAIL_BIN="$HERE/bin/omp-jail-bin"
+JAIL_BIN="$HERE/bin/agent-jail-bin"
 PROBE_OBJ="$HERE/bin/probe.bpf.o"
 
 MODE=jail
@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     --runtime) RUNTIME_ARGS="$RUNTIME_ARGS --runtime $2"; shift 2 ;;
     --) shift; OMP_ARGS="$*"; break ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    -*) echo "omp-jail: unknown flag $1" >&2; exit 2 ;;
+    -*) echo "agent-jail: unknown flag $1" >&2; exit 2 ;;
     *) if [ -z "$DIR" ]; then DIR="$1"; shift; else OMP_ARGS="$*"; break; fi ;;
   esac
 done
@@ -56,8 +56,8 @@ done
 DIR=$(CDPATH= cd -- "$DIR" && pwd)
 HOME_ABS=${HOME:-}
 
-[ -f "$JAIL_BIN" ]  || { echo "omp-jail: $JAIL_BIN missing — run 'make' first" >&2; exit 1; }
-[ -f "$PROBE_OBJ" ] || { echo "omp-jail: $PROBE_OBJ missing — run 'make' first" >&2; exit 1; }
+[ -f "$JAIL_BIN" ]  || { echo "agent-jail: $JAIL_BIN missing — run 'make' first" >&2; exit 1; }
+[ -f "$PROBE_OBJ" ] || { echo "agent-jail: $PROBE_OBJ missing — run 'make' first" >&2; exit 1; }
 
 # The launcher is what actually runs omp. In audit mode it skips Landlock so the
 # watcher can show what WOULD leak.
@@ -67,8 +67,8 @@ else
   LAUNCH="$JAIL_BIN $ALLOW_ARGS $RUNTIME_ARGS $DIR -- $OMP $OMP_ARGS"
 fi
 
-echo "omp-jail: $MODE — dir $DIR"
-echo "omp-jail: launching watcher (needs root for eBPF); omp starts underneath."
+echo "agent-jail: $MODE — dir $DIR"
+echo "agent-jail: launching watcher (needs root for eBPF); omp starts underneath."
 
 # The watcher (yeet) can't spawn processes itself, so the wrapper starts omp
 # jailed in the background and runs the watcher in the foreground, filtering on

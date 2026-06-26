@@ -1,6 +1,6 @@
-// omp-jail — confine a process to one directory tree with Landlock, then exec it.
+// agent-jail — confine a process to one directory tree with Landlock, then exec it.
 //
-// This is the ENFORCEMENT half of the omp-jail tool. It is deliberately tiny
+// This is the ENFORCEMENT half of the agent-jail tool. It is deliberately tiny
 // and dependency-free: three Landlock syscalls and an execve. Read it top to
 // bottom — there is nothing hidden.
 //
@@ -22,7 +22,7 @@
 // (e.g. an AI agent calling a model API) is untouched by design — you want
 // those calls to work. "Restrict to this directory" means filesystem paths.
 //
-// Build: cc -O2 -Wall -o bin/omp-jail src/jail/omp-jail.c   (see Makefile)
+// Build: cc -O2 -Wall -o bin/agent-jail src/jail/agent-jail.c   (see Makefile)
 
 #define _GNU_SOURCE
 #include <errno.h>
@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
 	if (i < argc && strcmp(argv[i], "--") == 0)
 		i++; // optional separator
 	if (i >= argc) {
-		fprintf(stderr, "omp-jail: no command given\n");
+		fprintf(stderr, "agent-jail: no command given\n");
 		usage(argv[0]);
 		return 2;
 	}
@@ -257,15 +257,15 @@ int main(int argc, char **argv) {
 	// agree on exactly one prefix.
 	char dir_abs[PATH_MAX];
 	if (!realpath(dir, dir_abs)) {
-		fprintf(stderr, "omp-jail: cannot resolve directory '%s': %s\n", dir,
+		fprintf(stderr, "agent-jail: cannot resolve directory '%s': %s\n", dir,
 		        strerror(errno));
 		return 1;
 	}
 
 	if (no_jail) {
-		fprintf(stderr, "omp-jail: --no-jail — running UNCONFINED (audit mode)\n");
+		fprintf(stderr, "agent-jail: --no-jail — running UNCONFINED (audit mode)\n");
 		execvp(cmd[0], cmd);
-		fprintf(stderr, "omp-jail: exec '%s' failed: %s\n", cmd[0], strerror(errno));
+		fprintf(stderr, "agent-jail: exec '%s' failed: %s\n", cmd[0], strerror(errno));
 		return 127;
 	}
 
@@ -274,15 +274,15 @@ int main(int argc, char **argv) {
 	if (abi < 1) {
 		if (best_effort) {
 			fprintf(stderr,
-			        "omp-jail: Landlock unavailable (abi=%ld) — running UNCONFINED "
+			        "agent-jail: Landlock unavailable (abi=%ld) — running UNCONFINED "
 			        "(--best-effort)\n",
 			        abi);
 			execvp(cmd[0], cmd);
-			fprintf(stderr, "omp-jail: exec failed: %s\n", strerror(errno));
+			fprintf(stderr, "agent-jail: exec failed: %s\n", strerror(errno));
 			return 127;
 		}
 		fprintf(stderr,
-		        "omp-jail: Landlock not available on this kernel (abi=%ld).\n"
+		        "agent-jail: Landlock not available on this kernel (abi=%ld).\n"
 		        "          Need Linux >= 5.13 with CONFIG_SECURITY_LANDLOCK=y.\n"
 		        "          Re-run with --best-effort to run unconfined anyway.\n",
 		        abi);
@@ -298,14 +298,14 @@ int main(int argc, char **argv) {
 	struct landlock_ruleset_attr ra = {.handled_access_fs = handled};
 	int ruleset_fd = ll_create_ruleset(&ra, sizeof(ra), 0);
 	if (ruleset_fd < 0) {
-		fprintf(stderr, "omp-jail: landlock_create_ruleset failed: %s\n",
+		fprintf(stderr, "agent-jail: landlock_create_ruleset failed: %s\n",
 		        strerror(errno));
 		return 1;
 	}
 
 	// 1) Full access beneath the target dir.
 	if (allow_path(ruleset_fd, dir_abs, handled) < 0) {
-		fprintf(stderr, "omp-jail: cannot allow target dir '%s': %s\n", dir_abs,
+		fprintf(stderr, "agent-jail: cannot allow target dir '%s': %s\n", dir_abs,
 		        strerror(errno));
 		return 1;
 	}
@@ -313,12 +313,12 @@ int main(int argc, char **argv) {
 	for (int a = 0; a < n_allow; a++) {
 		int rc = allow_path(ruleset_fd, allow_extra[a], handled);
 		if (rc < 0) {
-			fprintf(stderr, "omp-jail: --allow '%s' failed: %s\n", allow_extra[a],
+			fprintf(stderr, "agent-jail: --allow '%s' failed: %s\n", allow_extra[a],
 			        strerror(errno));
 			return 1;
 		}
 		if (rc == 1)
-			fprintf(stderr, "omp-jail: --allow '%s' does not exist — skipped\n",
+			fprintf(stderr, "agent-jail: --allow '%s' does not exist — skipped\n",
 			        allow_extra[a]);
 	}
 	// 2b) Runtime/interpreter trees, read+EXECUTE only (no write). For an
@@ -329,19 +329,19 @@ int main(int argc, char **argv) {
 	for (int a = 0; a < n_runtime; a++) {
 		int rc = allow_path(ruleset_fd, runtime_extra[a], ACCESS_FS_READ & handled);
 		if (rc < 0) {
-			fprintf(stderr, "omp-jail: --runtime '%s' failed: %s\n", runtime_extra[a],
+			fprintf(stderr, "agent-jail: --runtime '%s' failed: %s\n", runtime_extra[a],
 			        strerror(errno));
 			return 1;
 		}
 		if (rc == 1)
-			fprintf(stderr, "omp-jail: --runtime '%s' does not exist — skipped\n",
+			fprintf(stderr, "agent-jail: --runtime '%s' does not exist — skipped\n",
 			        runtime_extra[a]);
 	}
 	// 3) System code/lib directories: read+execute, so the program can load
 	//    libraries and run. No user secrets live here.
 	for (size_t s = 0; s < sizeof(SYS_RO_DIRS) / sizeof(*SYS_RO_DIRS); s++) {
 		if (allow_path(ruleset_fd, SYS_RO_DIRS[s], ACCESS_FS_READ & handled) < 0) {
-			fprintf(stderr, "omp-jail: warning: could not add %s read rule: %s\n",
+			fprintf(stderr, "agent-jail: warning: could not add %s read rule: %s\n",
 			        SYS_RO_DIRS[s], strerror(errno));
 		}
 	}
@@ -354,14 +354,14 @@ int main(int argc, char **argv) {
 		int rc = allow_path(ruleset_fd, SYS_RO_FILES[s],
 		                    LANDLOCK_ACCESS_FS_READ_FILE & handled);
 		if (rc < 0)
-			fprintf(stderr, "omp-jail: warning: %s read rule failed: %s\n",
+			fprintf(stderr, "agent-jail: warning: %s read rule failed: %s\n",
 			        SYS_RO_FILES[s], strerror(errno));
 	}
 	// 5) Pseudo-filesystems (/dev, /proc, /sys): read+write, needed at runtime,
 	//    no on-disk user data exposed.
 	for (size_t s = 0; s < sizeof(SYS_RW_PSEUDO) / sizeof(*SYS_RW_PSEUDO); s++) {
 		if (allow_path(ruleset_fd, SYS_RW_PSEUDO[s], handled) < 0)
-			fprintf(stderr, "omp-jail: warning: %s rule failed: %s\n",
+			fprintf(stderr, "agent-jail: warning: %s rule failed: %s\n",
 			        SYS_RW_PSEUDO[s], strerror(errno));
 	}
 	// 6) The command's own binary, read+execute. The program lives outside the
@@ -405,7 +405,7 @@ int main(int argc, char **argv) {
 			// Read+execute on just this file so the loader can mmap and run it.
 			__u64 binrights = (LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_READ_FILE) & handled;
 			if (allow_path(ruleset_fd, resolved, binrights) < 0)
-				fprintf(stderr, "omp-jail: warning: binary '%s' rule failed: %s\n",
+				fprintf(stderr, "agent-jail: warning: binary '%s' rule failed: %s\n",
 				        resolved, strerror(errno));
 			strncpy(exec_path, resolved, sizeof(exec_path) - 1);
 			exec_path[sizeof(exec_path) - 1] = '\0';
@@ -420,12 +420,12 @@ int main(int argc, char **argv) {
 	// No new privileges, then lock. PR_SET_NO_NEW_PRIVS is required before
 	// landlock_restrict_self for an unprivileged caller.
 	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
-		fprintf(stderr, "omp-jail: prctl(NO_NEW_PRIVS) failed: %s\n",
+		fprintf(stderr, "agent-jail: prctl(NO_NEW_PRIVS) failed: %s\n",
 		        strerror(errno));
 		return 1;
 	}
 	if (ll_restrict_self(ruleset_fd, 0)) {
-		fprintf(stderr, "omp-jail: landlock_restrict_self failed: %s\n",
+		fprintf(stderr, "agent-jail: landlock_restrict_self failed: %s\n",
 		        strerror(errno));
 		return 1;
 	}
@@ -443,6 +443,6 @@ int main(int argc, char **argv) {
 		execv(exec_path, cmd);
 	}
 	execvp(cmd[0], cmd);
-	fprintf(stderr, "omp-jail: exec '%s' failed: %s\n", cmd[0], strerror(errno));
+	fprintf(stderr, "agent-jail: exec '%s' failed: %s\n", cmd[0], strerror(errno));
 	return 127;
 }

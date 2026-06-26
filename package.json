@@ -1,9 +1,9 @@
 {
-  "name": "omp-jail",
+  "name": "agent-jail",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "omp-jail — a yeet script.",
+  "description": "agent-jail — a yeet script.",
   "scripts": {
     "build": "esbuild src/main.jsx --bundle --format=esm --platform=neutral --main-fields=module,main --conditions=import,module --outfile=src/index.jsx --jsx=automatic --jsx-import-source=yeet:tui '--external:yeet:*' '--external:*.bpf.o'"
   },

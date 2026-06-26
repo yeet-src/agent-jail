@@ -1,6 +1,6 @@
-/* omp-jail — watch a Landlock-confined omp and prove the jail holds.
+/* agent-jail — watch a Landlock-confined omp and prove the jail holds.
  *
- * This is the WATCHER (the observability half). The `omp-jail` command (the
+ * This is the WATCHER (the observability half). The `agent-jail` command (the
  * shell wrapper in scripts/) backgrounds this yeet script and runs the C
  * Landlock launcher in the foreground; together they are one tool. This script
  * does not confine anything — it witnesses every file omp opens, classifies it

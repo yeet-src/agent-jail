@@ -7,7 +7,7 @@ export const EACCES = 13; // Landlock refuses with -EACCES
 export const EPERM = 1;
 
 // System path prefixes the jail grants read access to so programs can run at
-// all (mirrors SYS_RO_DIRS / SYS_RW_PSEUDO in src/jail/omp-jail.c). An open
+// all (mirrors SYS_RO_DIRS / SYS_RW_PSEUDO in src/jail/agent-jail.c). An open
 // under these is OUTSIDE the project dir but PERMITTED and benign — loader,
 // libraries, locale, /proc self-inspection. We classify these as "system", not
 // escapes, so the leaderboard shows only genuine reaches at user data instead

@@ -1,7 +1,5 @@
 # agent-jail
 
-<sub>(the command, binary, and scripts are still named `omp-jail` — rename in progress)</sub>
-
 > **⚠️ Status: experimental (v0.x). Not yet production-hardened.**
 > The core confinement works and survives an adversarial breakout suite, but it
 > has only been verified on **one kernel/arch** (Linux 6.12, arm64, Debian 13)
@@ -28,15 +26,11 @@ directory. One command does both halves:
 The enforcement is what protects you. The dashboard proves it's working, and
 turns "my AI agent is sandboxed" into something you can watch and screenshot.
 
-```
- ● agent-jail  ⊟ JAILED   ▏  dir ~/project
- ████████████░░░░░░░░░██  812 in-bounds  ▏  37 blocked  ▏  9.5K system  ▁▂▅▃▂ 41/s
- ⤳ escape attempts (outside the jail)            ◇ live file opens
-  🔥 /etc/passwd            6×  blocked        · ./src/main.go        ok
-  🔥 ~/.ssh/id_rsa          4×  blocked        · ./go.mod             ok
-     ~/.aws/credentials     3×  blocked        ⮌ /etc/passwd          blocked
-     /tmp/scratch.log       2×  blocked        ⮌ ~/.ssh/id_rsa        blocked
-```
+![agent-jail in action — the live dashboard blocking out-of-bounds reads](docs/agent-jail.gif)
+
+<sub>Live: an agent works inside its project (green, in-bounds) while reaches at
+`~/.ssh`, `~/.aws`, `/etc/passwd` climb the escape leaderboard — every one
+blocked by the kernel. ↑/↓ moves the highlighted row.</sub>
 
 ## Why
 
@@ -53,24 +47,24 @@ On macOS, run inside the Lima VM (see the top-level `CLAUDE.md`). Build needs
 `clang`, `bpftool`, `make`, and a C compiler.
 
 ```sh
-git clone <this repo> && cd omp-jail
+git clone <this repo> && cd agent-jail
 make                       # builds the BPF object, the Landlock launcher, and the JS bundle
-sudo ./scripts/omp-jail    # jail omp in the current directory and watch it
+sudo ./scripts/agent-jail    # jail omp in the current directory and watch it
 ```
 
-Put `scripts/omp-jail` on your `PATH` (or symlink it) to run `omp-jail` from
+Put `scripts/agent-jail` on your `PATH` (or symlink it) to run `agent-jail` from
 anywhere.
 
 ## Usage
 
 ```sh
-omp-jail                      # jail omp in the current directory
-omp-jail ~/project            # jail omp in ~/project
-omp-jail --allow ~/.config/omp ~/project   # also grant read+write to an extra path (repeatable)
-omp-jail --runtime ~/.bun ~/project -- bun run omp   # interpreted install: see below
-omp-jail --headless ~/project # no TUI — stream escape reports (background mode)
-omp-jail --audit              # run UNCONFINED, watch what WOULD get through
-omp-jail -- --some-omp-flag   # everything after -- is passed through to omp
+agent-jail                      # jail omp in the current directory
+agent-jail ~/project            # jail omp in ~/project
+agent-jail --allow ~/.config/omp ~/project   # also grant read+write to an extra path (repeatable)
+agent-jail --runtime ~/.bun ~/project -- bun run omp   # interpreted install: see below
+agent-jail --headless ~/project # no TUI — stream escape reports (background mode)
+agent-jail --audit              # run UNCONFINED, watch what WOULD get through
+agent-jail -- --some-omp-flag   # everything after -- is passed through to omp
 ```
 
 The dashboard runs in your terminal; `omp` runs underneath it. Press **↑/↓**
@@ -88,7 +82,7 @@ loading itself. Point `--runtime` at the runtime root to grant it **read-only**
 execute access without opening it for writes or treating it as an escape target:
 
 ```sh
-omp-jail --runtime ~/.bun ~/project -- bun run omp
+agent-jail --runtime ~/.bun ~/project -- bun run omp
 ```
 
 `--runtime` is read+execute (the runtime can load); `--allow` is read+write (a
@@ -103,8 +97,8 @@ escape attempts (not in-bounds or system noise), announces each new target once,
 then periodically rolls up repeat counts so a hot loop doesn't flood the log.
 
 ```sh
-sudo omp-jail --headless ~/project > escapes.jsonl &     # background, JSON
-sudo omp-jail --headless --format text ~/project          # human-readable
+sudo agent-jail --headless ~/project > escapes.jsonl &     # background, JSON
+sudo agent-jail --headless --format text ~/project          # human-readable
 ```
 
 ```json
@@ -156,7 +150,7 @@ sh scripts/adversary.sh                                   # ~10 leaks
 
 # jailed — Landlock + the env scrub defeat every one
 cp scripts/adversary.sh ~/project/ && \
-  sudo bin/omp-jail-bin ~/project -- /bin/sh ~/project/adversary.sh   # 0 leaks
+  sudo bin/agent-jail-bin ~/project -- /bin/sh ~/project/adversary.sh   # 0 leaks
 ```
 
 Verified result: **10 leaks unconfined → 0 leaks jailed**, including with a real
@@ -235,12 +229,12 @@ suite (`scripts/adversary.sh`) is where new escape techniques should be added.
 ## How it's built
 
 ```
-src/jail/omp-jail.c       the Landlock launcher (enforcement) — dependency-free C
+src/jail/agent-jail.c       the Landlock launcher (enforcement) — dependency-free C
 src/bpf/fileaccess.bpf.c  the eBPF tracer: openat/openat2 + fork/exit, retval capture
 src/probes/               BPF data layer — binds maps, exposes reactive signals
 src/components/            the TUI (header, escape leaderboard, live feed, footer)
 src/lib/                  pure helpers — classification, layout, formatting, summary
-scripts/omp-jail          the one-command wrapper that runs both halves
+scripts/agent-jail          the one-command wrapper that runs both halves
 ```
 
 The launcher and the eBPF program are independent — the launcher enforces with

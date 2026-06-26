@@ -6,7 +6,7 @@
 # its own comm. The jail confines the whole tree (inherited across exec), and the
 # watcher attributes every open to the child that made it.
 #
-# Run JAILED (omp-jail-bin execs this as the "omp" stand-in). The agent's own
+# Run JAILED (agent-jail-bin execs this as the "omp" stand-in). The agent's own
 # reads are rare; the real work is delegated to children — which is what makes
 # the dashboard show `git`, `cat`, `grep`, `node` in the feed, and occasionally a
 # BLOCKED escape attributed to one of them (e.g. `git` reaching for ~/.gitconfig,

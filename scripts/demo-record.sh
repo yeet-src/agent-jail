@@ -5,7 +5,7 @@
 # outside the project), then runs the live dashboard in the foreground. By the
 # time the TUI paints, the panels are already filling with believable activity.
 #
-#   sudo ~/omp-jail-fresh/scripts/demo-record.sh
+#   sudo ~/agent-jail-fresh/scripts/demo-record.sh
 #
 # Press ↑/↓ to scroll the escape list, c to copy a summary, q to quit.
 set -eu
@@ -14,7 +14,7 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PROJ=${DEMO_DIR:-$HOME/webapp}
 HOME_ABS=${HOME:-/root}
 
-[ -f "$HERE/bin/omp-jail-bin" ] || { echo "run 'make' first"; exit 1; }
+[ -f "$HERE/bin/agent-jail-bin" ] || { echo "run 'make' first"; exit 1; }
 [ -f "$HERE/bin/probe.bpf.o" ]  || { echo "run 'make' first"; exit 1; }
 
 # Scaffold the realistic project + decoy secrets.
@@ -29,7 +29,7 @@ AGENT=$(cat "$HERE/scripts/demo-agent.sh")
 echo "starting realistic jailed agent + dashboard…"
 # Background the jailed agent. In an interactive shell this child persists for
 # the life of the script; cleaned up on exit.
-PROJECT="$PROJ" "$HERE/bin/omp-jail-bin" "$PROJ" -- "$STANDIN" -c "$AGENT" >/dev/null 2>&1 &
+PROJECT="$PROJ" "$HERE/bin/agent-jail-bin" "$PROJ" -- "$STANDIN" -c "$AGENT" >/dev/null 2>&1 &
 WL=$!
 cleanup() {
   kill "$WL" 2>/dev/null || true

@@ -2,19 +2,21 @@
 // OUTSIDE the jailed directory by attempt count. Sensitive targets (keys,
 // creds, history) wear a 🔥 and an orange path so they jump out. A verdict
 // badge on the right shows what the kernel did — blocked (jail held), leaked
-// (it got through, audit mode), or absent (the file wasn't there).
+// (it got through, audit mode). A reach that didn't get through reads as
+// "blocked" whether the kernel refused it or the file wasn't there.
 import { Box, Text, bold, fg, bg, idx, C, frameTop, frameBottom } from "@/lib/theme.js";
 import { clipPath, fmtCount, lpad, pad, tildify } from "@/lib/format.js";
 
 // A right-aligned verdict badge, ALWAYS exactly 7 display columns so every row
 // ends at the same border. "REACHED" keeps the loud inverted fill at 7.
+// Two outcomes only: it got through ("reached") or it didn't ("blocked"). An
+// out-of-bounds reach that returned no data — kernel refusal (EACCES) or the
+// file not existing (ENOENT) — both read as "blocked": it didn't get through.
 const badge = (e) => {
   if (e.reached) return bold(bg(C.leak)(fg(idx(231))("REACHED")));
   const v = e.lastVerdict;
   if (!v) return fg(C.faint)("   …   ");
-  if (v.label === "EACCES" || v.label === "EPERM") return fg(C.safe)("blocked");
-  if (v.label === "ENOENT") return fg(C.faint)(" absent");
-  return fg(C.textDim)(lpad(v.label, 7));
+  return fg(C.safe)("blocked");
 };
 
 // Title with a scroll indicator: shows the visible window over the total when

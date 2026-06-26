@@ -6,13 +6,13 @@ import { clipPath, lpad, pad, tildify } from "@/lib/format.js";
 
 const badge = (f) => {
   // Every badge is exactly 6 display columns so rows end at the same border.
-  if (f.reached) return bold(fg(C.leak)("reachd"));
+  if (f.reached) return bold(fg(C.leak)("reachd"));    // escape got through
   const v = f.verdict;
   if (!v) return fg(C.faint)("     …");
-  if (v.ok) return fg(C.safe)("    ok");
-  if (v.label === "EACCES" || v.label === "EPERM") return fg(C.safe)("blockd");
-  if (v.label === "ENOENT") return fg(C.faint)("absent");
-  return fg(C.textDim)(lpad(v.label, 6).slice(0, 6));
+  if (f.in_bounds && v.ok) return fg(C.safe)("    ok"); // legit in-bounds open
+  // Any out-of-bounds reach that didn't return data — refused (EACCES) or the
+  // file wasn't there (ENOENT) — reads as "blockd": it didn't get through.
+  return fg(C.safe)("blockd");
 };
 
 export default ({ stats, home, maxRows, width }) => (

@@ -1,30 +1,25 @@
 #!/bin/sh
-# demo-agent.sh — mimic a real omp coding session for the dashboard demo. Run
-# JAILED (the wrapper / omp-jail-bin execs this as the "omp" stand-in). It does
-# what an agent actually does while building software: bursts of in-bounds reads
-# to understand the code, edits, test/build runs — interleaved with the
-# occasional reach OUTSIDE the project (checking env, hunting for config, a
-# misfired tool call). Those out-of-bounds reaches are what the jail blocks.
+# demo-agent.sh — mimic a real omp coding session for the dashboard demo, the way
+# omp actually works: by SHELLING OUT to real tools. omp is a Bun process that
+# runs cat/grep/git/node/ls/find to read and search the codebase, run tests, and
+# inspect git — so the file opens come from a TREE of child processes, each with
+# its own comm. The jail confines the whole tree (inherited across exec), and the
+# watcher attributes every open to the child that made it.
 #
-# The mix is weighted and varied (not a tight uniform loop) so on camera it
-# reads like genuine activity, not a synthetic hammer.
+# Run JAILED (omp-jail-bin execs this as the "omp" stand-in). The agent's own
+# reads are rare; the real work is delegated to children — which is what makes
+# the dashboard show `git`, `cat`, `grep`, `node` in the feed, and occasionally a
+# BLOCKED escape attributed to one of them (e.g. `git` reaching for ~/.gitconfig,
+# `cat` for /etc/passwd).
 set -u
 P="${PROJECT:-$HOME/webapp}"
 cd "$P" 2>/dev/null || true
 
-# In-bounds files the agent legitimately works with.
-SRC="src/index.ts src/api/router.ts src/components/Button.tsx src/components/Modal.tsx src/lib/format.ts src/lib/db.ts tests/format.test.ts package.json tsconfig.json README.md .gitignore"
+# In-bounds source the agent works with, and out-of-bounds targets it may wander
+# into (all blocked by the jail).
+SRC="src/index.ts src/api/router.ts src/components/Button.tsx src/components/Modal.tsx src/lib/format.ts src/lib/db.ts tests/format.test.ts package.json tsconfig.json README.md"
+OUT="$HOME/.ssh/id_rsa $HOME/.aws/credentials $HOME/.config/gh/hosts.yml /etc/passwd $HOME/.gitconfig $HOME/.bashrc"
 
-# Out-of-bounds targets an agent might wander into (all should be BLOCKED).
-OUT="$HOME/.ssh/id_rsa $HOME/.aws/credentials $HOME/.config/gh/hosts.yml /etc/passwd $HOME/.bashrc /etc/hosts"
-
-rd() { { read _x < "$1"; } 2>/dev/null; }          # read a file (open)
-wr() { { echo "// edit $(date +%s 2>/dev/null)" >> "$1"; } 2>/dev/null; } # append (in-bounds write)
-
-# Pick a pseudo-random item from "$@". `pick` runs inside $(...) (a subshell), so
-# a persistent seed wouldn't survive between calls — instead we mix the live
-# clock-ish counter `tick` (bumped by the caller) into the hash, so successive
-# picks vary. No $RANDOM in dash.
 tick=0
 pick() { h=$(( (tick * 2654435761 + 40503) % 2147483647 )); n=$(( h % $# )); i=0; for a in "$@"; do [ "$i" -eq "$n" ] && { echo "$a"; return; }; i=$((i+1)); done; }
 
@@ -32,23 +27,34 @@ phase=0
 while :; do
   phase=$((phase + 1))
 
-  # PHASE A — "reading the codebase" : a quick burst of in-bounds source reads.
-  k=0; while [ $k -lt 5 ]; do tick=$((tick+1)); rd "$(pick $SRC)"; k=$((k+1)); sleep 0.05; done
+  # "read the codebase" — omp shells out to cat/head to read source files.
+  tick=$((tick+1)); cat   "$(pick $SRC)" >/dev/null 2>&1; sleep 0.05
+  tick=$((tick+1)); head -n 20 "$(pick $SRC)" >/dev/null 2>&1; sleep 0.05
 
-  # PHASE B — "editing" : read a file, write it back a couple times.
-  tick=$((tick+1)); f=$(pick $SRC); rd "$f"; wr "$f"; sleep 0.08; rd "$f"; wr "$f"; sleep 0.08
+  # "search for a symbol" — grep across the tree (reads many files).
+  grep -r "export" src >/dev/null 2>&1; sleep 0.06
 
-  # PHASE C — "running tests/build" : re-read configs + test files.
-  rd package.json; rd tsconfig.json; rd tests/format.test.ts; sleep 0.1
+  # "list / explore" — ls and find, like an agent orienting itself.
+  ls -la src/components >/dev/null 2>&1
+  find src -name "*.ts" >/dev/null 2>&1; sleep 0.05
 
-  # PHASE D — WANDER outside the project (every other phase), a reach at
-  # env/config/secrets. This is the part the jail blocks. Frequent enough that
-  # the escape leaderboard fills promptly on camera, but still the minority of
-  # activity, so the mix reads as realistic.
+  # "edit a file" — the agent itself writes (in-bounds).
+  tick=$((tick+1)); f=$(pick $SRC); echo "// edit $phase" >> "$f" 2>/dev/null; sleep 0.06
+
+  # "check git / run tests" — real git + node children reading the project.
+  git status >/dev/null 2>&1
+  git log --oneline -5 >/dev/null 2>&1
+  node -e "require('"'"'fs'"'"').readFileSync('"'"'package.json'"'"')" >/dev/null 2>&1; sleep 0.08
+
+  # WANDER — every other phase a child reaches OUTSIDE the project at a secret.
+  # Attributed to that child (cat/grep/git), and BLOCKED by the jail. Different
+  # tools so the feed shows a believable spread of who-tried-what.
   if [ $(( phase % 2 )) -eq 0 ]; then
-    tick=$((tick+1)); rd "$(pick $OUT)"; sleep 0.06
-    tick=$((tick+1)); rd "$(pick $OUT)"
+    tick=$((tick+1)); cat  "$(pick $OUT)" >/dev/null 2>&1; sleep 0.05
+    tick=$((tick+1)); grep "token" "$(pick $OUT)" >/dev/null 2>&1
   fi
+  # occasionally git itself reaches for ~/.gitconfig (a classic real escape).
+  [ $(( phase % 3 )) -eq 0 ] && cat "$HOME/.gitconfig" >/dev/null 2>&1
 
   sleep 0.15
 done

@@ -66,21 +66,60 @@ anywhere.
 ```sh
 omp-jail                      # jail omp in the current directory
 omp-jail ~/project            # jail omp in ~/project
-omp-jail --allow ~/.config/omp ~/project   # also permit one extra path (repeatable)
-omp-jail --audit              # run UNCONFINED, watch what WOULD leak (see below)
+omp-jail --allow ~/.config/omp ~/project   # also grant read+write to an extra path (repeatable)
+omp-jail --runtime ~/.bun ~/project -- bun run omp   # interpreted install: see below
+omp-jail --headless ~/project # no TUI — stream escape reports (background mode)
+omp-jail --audit              # run UNCONFINED, watch what WOULD get through
 omp-jail -- --some-omp-flag   # everything after -- is passed through to omp
 ```
 
-The dashboard runs in your terminal; `omp` runs underneath it. Press **c** to
-copy a shareable session summary, **q** to quit the watcher.
+The dashboard runs in your terminal; `omp` runs underneath it. Press **↑/↓**
+(or PgUp/PgDn, **g**/**G**) to scroll the escape-attempts pane, **c** to copy a
+shareable session summary, **q** to quit the watcher.
+
+### Installs: binary vs. interpreter
+
+The **smoothest path is a prebuilt single-file binary** — it's self-contained,
+so the jail grants execute on that one file and nothing else. No extra flags.
+
+For an **interpreted install** (`bun run omp`, node, python), the runtime and the
+agent's code live *outside* your project, so the jail would block the agent from
+loading itself. Point `--runtime` at the runtime root to grant it **read-only**
+execute access without opening it for writes or treating it as an escape target:
+
+```sh
+omp-jail --runtime ~/.bun ~/project -- bun run omp
+```
+
+`--runtime` is read+execute (the runtime can load); `--allow` is read+write (a
+working path). Use the narrowest one that works.
+
+### Headless / background mode
+
+`--headless` skips the TUI and instead streams one structured line per escape
+attempt to stdout — for running detached, piping to a file, or feeding a log
+shipper. JSON by default (`--format text` for human-readable). It reports only
+escape attempts (not in-bounds or system noise), announces each new target once,
+then periodically rolls up repeat counts so a hot loop doesn't flood the log.
+
+```sh
+sudo omp-jail --headless ~/project > escapes.jsonl &     # background, JSON
+sudo omp-jail --headless --format text ~/project          # human-readable
+```
+
+```json
+{"event":"start","mode":"jail","dir":"~/project","watching":"escape_attempts"}
+{"seq":2,"event":"escape_attempt","path":"/etc/passwd","by":"omp","outcome":"blocked","sensitive":true,"verdict":"EACCES"}
+```
 
 ### Audit mode
 
-`--audit` runs `omp` **without** the jail but with the watcher. Every escape
-that would normally be blocked instead **succeeds** and is shown as `LEAKED` in
-loud magenta. It's the before picture: run it once to see what `omp` reaches for
-unconfined, then drop `--audit` to lock it down. Good for convincing yourself
-(or a teammate) the jail earns its place.
+`--audit` runs `omp` **without** the jail but with the watcher. Every escape that
+would normally be blocked instead **succeeds** and is shown as `reached` in loud
+magenta — "it got through." (Note: "reached" means the out-of-bounds open
+succeeded; it doesn't assert the contents were exfiltrated.) It's the before
+picture: run it once to see what `omp` reaches for unconfined, then drop
+`--audit` to lock it down.
 
 ## What it protects — and what it doesn't
 

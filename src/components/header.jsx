@@ -38,7 +38,7 @@ export default ({ stats, mode, dir }) => (
         {() => {
           const s = stats.get();
           const on = mode === "jail";
-          if (on && s.blocked > 0 && s.leaked === 0) {
+          if (on && s.blocked > 0 && s.reached === 0) {
             return [
               " ", bold(fg(C.safe)("✓ ")),
               bold(fg(C.safe)(fmtCount(s.blocked))),
@@ -49,11 +49,11 @@ export default ({ stats, mode, dir }) => (
                 : "",
             ];
           }
-          if (s.leaked > 0) {
+          if (s.reached > 0) {
             return [
               " ", bold(fg(C.leak)("⚠ ")),
-              bold(fg(C.leak)(fmtCount(s.leaked))),
-              fg(C.text)(" reads escaped the directory"),
+              bold(fg(C.leak)(fmtCount(s.reached))),
+              fg(C.text)(" out-of-bounds reads got through"),
               fg(C.textDim)(on ? "" : " — run without --audit to block them."),
             ];
           }
@@ -68,7 +68,7 @@ export default ({ stats, mode, dir }) => (
       <Text break="none">
         {() => {
           const s = stats.get();
-          const split = splitBar(s.allowed, s.system || 0, s.blocked, s.leaked, BAR_W);
+          const split = splitBar(s.allowed, s.system || 0, s.blocked, s.reached, BAR_W);
           const bar = [
             fg(C.safe)("█".repeat(split.a)),
             fg(C.system)("█".repeat(split.s)),
@@ -81,7 +81,7 @@ export default ({ stats, mode, dir }) => (
             " ", ...bar, "  ",
             bold(fg(C.safe)(fmtCount(s.allowed))), fg(C.textDim)(" in-bounds"), sep,
             bold(fg(C.block)(fmtCount(s.blocked))), fg(C.textDim)(" blocked"),
-            s.leaked > 0 ? [sep, bold(fg(C.leak)(fmtCount(s.leaked))), fg(C.leak)(" leaked")] : "",
+            s.reached > 0 ? [sep, bold(fg(C.leak)(fmtCount(s.reached))), fg(C.leak)(" reached")] : "",
             sep, fg(C.system)(`${fmtCount(s.system || 0)} system`),
             sep, fg(C.safeDim)(sparkline(s.spark.slice(-20))), fg(C.textDim)(` ${fmtRate(rate)}/s`),
           ];

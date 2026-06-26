@@ -178,13 +178,18 @@ static const char *const SYS_RW_PSEUDO[] = {
 
 static void usage(const char *argv0) {
 	fprintf(stderr,
-	        "usage: %s [--allow PATH]... [--best-effort] [--no-jail] DIR -- CMD [ARGS...]\n"
+	        "usage: %s [--allow PATH]... [--runtime PATH]... [--best-effort] [--no-jail] DIR -- CMD [ARGS...]\n"
 	        "       %s [opts] DIR CMD [ARGS...]\n"
 	        "\n"
 	        "Confine CMD to DIR (read+write) plus system paths (read-only), then exec it.\n"
 	        "  --allow PATH    also grant read+write beneath PATH (repeatable)\n"
+	        "  --runtime PATH  grant read+EXECUTE beneath PATH for an interpreter/runtime\n"
+	        "                  (e.g. --runtime ~/.bun for `bun run omp`); repeatable\n"
 	        "  --best-effort   if Landlock is unavailable, warn and run UNCONFINED\n"
-	        "  --no-jail       skip Landlock entirely (audit mode; run unconfined)\n",
+	        "  --no-jail       skip Landlock entirely (audit mode; run unconfined)\n"
+	        "\n"
+	        "Tip: a prebuilt single-file binary needs no --runtime — it's the smoothest\n"
+	        "install. Use --runtime only for interpreted installs (bun/node/python).\n",
 	        argv0, argv0);
 }
 
@@ -207,8 +212,10 @@ static int allow_path(int ruleset_fd, const char *path, __u64 rights) {
 }
 
 int main(int argc, char **argv) {
-	const char *allow_extra[64];
+	const char *allow_extra[64]; // read+write extra dirs (--allow)
 	int n_allow = 0;
+	const char *runtime_extra[64]; // read+execute interpreter/runtime trees (--runtime)
+	int n_runtime = 0;
 	int best_effort = 0;
 	int no_jail = 0;
 
@@ -218,6 +225,9 @@ int main(int argc, char **argv) {
 		if (strcmp(argv[i], "--allow") == 0 && i + 1 < argc) {
 			if (n_allow < (int)(sizeof(allow_extra) / sizeof(*allow_extra)))
 				allow_extra[n_allow++] = argv[++i];
+		} else if (strcmp(argv[i], "--runtime") == 0 && i + 1 < argc) {
+			if (n_runtime < (int)(sizeof(runtime_extra) / sizeof(*runtime_extra)))
+				runtime_extra[n_runtime++] = argv[++i];
 		} else if (strcmp(argv[i], "--best-effort") == 0) {
 			best_effort = 1;
 		} else if (strcmp(argv[i], "--no-jail") == 0) {
@@ -310,6 +320,22 @@ int main(int argc, char **argv) {
 		if (rc == 1)
 			fprintf(stderr, "omp-jail: --allow '%s' does not exist — skipped\n",
 			        allow_extra[a]);
+	}
+	// 2b) Runtime/interpreter trees, read+EXECUTE only (no write). For an
+	//     interpreted agent (e.g. `bun run omp`), the runtime and the agent's JS
+	//     live outside the project — grant the runtime root (e.g. ~/.bun) so it
+	//     can load its code, without giving write access or exposing it as a
+	//     general escape target. This is the smooth path for non-binary installs.
+	for (int a = 0; a < n_runtime; a++) {
+		int rc = allow_path(ruleset_fd, runtime_extra[a], ACCESS_FS_READ & handled);
+		if (rc < 0) {
+			fprintf(stderr, "omp-jail: --runtime '%s' failed: %s\n", runtime_extra[a],
+			        strerror(errno));
+			return 1;
+		}
+		if (rc == 1)
+			fprintf(stderr, "omp-jail: --runtime '%s' does not exist — skipped\n",
+			        runtime_extra[a]);
 	}
 	// 3) System code/lib directories: read+execute, so the program can load
 	//    libraries and run. No user secrets live here.

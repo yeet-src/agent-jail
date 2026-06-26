@@ -7,9 +7,9 @@ import { Box, Text, bold, fg, bg, idx, C, frameTop, frameBottom } from "@/lib/th
 import { clipPath, fmtCount, lpad, pad, tildify } from "@/lib/format.js";
 
 // A right-aligned verdict badge, ALWAYS exactly 7 display columns so every row
-// ends at the same border. "LEAKED " keeps the loud inverted fill at 7.
+// ends at the same border. "REACHED" keeps the loud inverted fill at 7.
 const badge = (e) => {
-  if (e.leaked) return bold(bg(C.leak)(fg(idx(231))("LEAKED ")));
+  if (e.reached) return bold(bg(C.leak)(fg(idx(231))("REACHED")));
   const v = e.lastVerdict;
   if (!v) return fg(C.faint)("   …   ");
   if (v.label === "EACCES" || v.label === "EPERM") return fg(C.safe)("blocked");
@@ -17,16 +17,31 @@ const badge = (e) => {
   return fg(C.textDim)(lpad(v.label, 7));
 };
 
-export default ({ stats, home, maxRows, width }) => (
+// Title with a scroll indicator: shows the visible window over the total when
+// the list is longer than the pane (e.g. " ⤳ escape attempts  4–15 / 37 ↕").
+const titleFor = (total, from, count) => {
+  const base = "⤳ escape attempts";
+  if (total <= count) return base; // everything fits — no indicator
+  const lo = from + 1;
+  const hi = Math.min(total, from + count);
+  return `${base}  ${lo}–${hi} / ${total} ↕`;
+};
+
+export default ({ stats, home, maxRows, width, scroll }) => (
   <Box direction="column" width={`${width}`} height="100%">
-    <Text height="1">{() => frameTop(width, "⤳ escape attempts")}</Text>
+    <Text height="1">
+      {() => {
+        const s = stats.get();
+        const rows = Math.max(1, maxRows);
+        return frameTop(width, titleFor(s.escapes.length, scroll.get(), rows));
+      }}
+    </Text>
     <Box height="1fr" overflow="hidden">
       <Text break="none">
         {() => {
           const s = stats.get();
           const inner = width - 2;
           const rows = Math.max(1, maxRows);
-          // A bordered line: left │ + content padded to inner + right │.
           const line = (runs) => [fg(C.frame)("│"), runs, fg(C.frame)("│\n")];
           const blank = () => line(" ".repeat(inner));
           const out = [];
@@ -35,9 +50,13 @@ export default ({ stats, home, maxRows, width }) => (
             out.push(line(fg(C.textDim)(pad("   nothing has reached outside the directory yet.", inner))));
             out.push(line(fg(C.safe)(pad("   ✓ omp is staying in-bounds.", inner))));
           } else {
+            // Clamp the scroll offset to a valid window over the current list,
+            // so the view stays sane as the list grows/shrinks under it.
+            const maxOff = Math.max(0, s.escapes.length - rows);
+            const off = Math.min(Math.max(0, scroll.get()), maxOff);
             const rankW = 3, countW = 6;
             const pathW = Math.max(16, inner - rankW - 3 - countW - 8 - 2);
-            s.escapes.slice(0, rows).forEach((e, i) => {
+            s.escapes.slice(off, off + rows).forEach((e, i) => {
               const disp = clipPath(tildify(e.path, home), pathW);
               // 🔥 is a double-width glyph, so " 🔥" occupies 3 columns; the
               // non-sensitive marker must also be 3 columns or the right border
@@ -46,7 +65,7 @@ export default ({ stats, home, maxRows, width }) => (
               const nameColor = e.sensitive ? fg(C.fire) : fg(C.text);
               const countColor = e.sensitive ? fg(C.fire) : fg(C.block);
               out.push(line([
-                fg(C.faint)(lpad(`${i + 1}`, rankW)), mark, " ",
+                fg(C.faint)(lpad(`${off + i + 1}`, rankW)), mark, " ",
                 nameColor(pad(disp, pathW)), " ",
                 countColor(lpad(fmtCount(e.count) + "×", countW)), " ",
                 badge(e),

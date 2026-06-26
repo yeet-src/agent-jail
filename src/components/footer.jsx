@@ -13,12 +13,12 @@ export default () => (
   <Box height="1" direction="row" bg={C.rail}>
     <Text break="none">
       {[
-        "  ", ...cap("c", "copy summary"), ...cap("q", "quit"),
-        fg(C.faint)("  │   "),
+        "  ", ...cap("↑↓", "scroll"), ...cap("c", "copy"), ...cap("q", "quit"),
+        fg(C.faint)("│   "),
         ...swatch(C.safe, "in-bounds"),
         ...swatch(C.system, "system"),
         ...swatch(C.block, "blocked"),
-        ...swatch(C.leak, "leaked"),
+        ...swatch(C.leak, "reached"),
         fg(C.fire)("🔥 "), fg(C.textDim)("sensitive"),
       ]}
     </Text>

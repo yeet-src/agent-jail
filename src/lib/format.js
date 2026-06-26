@@ -43,15 +43,15 @@ export const sparkline = (series) => {
 };
 
 // A horizontal proportion bar of `width` cells split
-// in-bounds | system | blocked | leaked. Returns integer cell counts so the
+// in-bounds | system | blocked | reached. Returns integer cell counts so the
 // caller colours each run. System (benign permitted reads) is shown dim so the
 // bar reflects reality without making routine system access look alarming.
-export const splitBar = (allowed, system, blocked, leaked, width) => {
-  const total = allowed + system + blocked + leaked;
+export const splitBar = (allowed, system, blocked, reached, width) => {
+  const total = allowed + system + blocked + reached;
   if (total === 0) return { a: 0, s: 0, b: 0, l: 0, rest: width };
   const a = Math.round((allowed / total) * width);
   const s = Math.round((system / total) * width);
-  const l = Math.round((leaked / total) * width);
+  const l = Math.round((reached / total) * width);
   const b = Math.max(0, width - a - s - l);
   return { a, s, b, l, rest: 0 };
 };

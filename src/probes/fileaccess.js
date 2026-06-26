@@ -47,12 +47,35 @@ export function configure(dir, comm = TARGET_COMM) {
   });
 }
 
+// Headless tap: subscribe to every classified open and hand the caller a plain
+// fact object. Unlike `stats` (a UI-watched from() signal that only runs while
+// rendered), this runs as soon as it's called — the path for --headless, where
+// there is no TUI watching anything. Returns the subscription handle.
+//   cb({ path, comm, category, reached, sensitive, verdict })
+export function watchEscapes(cb) {
+  return events.subscribe((w) => {
+    const e = w?.file_event ?? w;
+    if (!e) return;
+    const path = commStr(e.path);
+    const inBounds = e.in_bounds === 1 || e.in_bounds === true;
+    const cls = classify(path, inBounds, Number(e.ret));
+    cb({
+      path,
+      comm: commStr(e.comm),
+      category: cls.category, // "in" | "system" | "escape"
+      reached: cls.reached,   // escape whose open succeeded
+      sensitive: cls.sensitive,
+      verdict: cls.verdict,   // { ok, label, errno }
+    });
+  });
+}
+
 // Live aggregate, republished every window. Shape consumed by the UI:
-//   { allowed, blocked, leaked, total, escapes: [{path, count, sensitive,
+//   { allowed, blocked, reached, total, escapes: [{path, count, sensitive,
 //     lastVerdict}], feed: [{path, in_bounds, verdict, sensitive, ts}],
 //     spark: [rate,...] }
 const blank = () => ({
-  allowed: 0, system: 0, blocked: 0, leaked: 0, total: 0,
+  allowed: 0, system: 0, blocked: 0, reached: 0, total: 0,
   sensitiveHits: 0, // count of escape events that hit a sensitive target
   escapes: [], feed: [], spark: new Array(SPARK).fill(0),
 });
@@ -62,7 +85,7 @@ export const stats = from((state) => {
   const escapeMap = new Map(); // path -> { count, sensitive, lastVerdict }
   const feed = [];
   const spark = new Array(SPARK).fill(0);
-  let allowed = 0, system = 0, blocked = 0, leaked = 0, total = 0, sensitiveHits = 0;
+  let allowed = 0, system = 0, blocked = 0, reached = 0, total = 0, sensitiveHits = 0;
   let windowCount = 0;
   let ts = 0; // monotonic-ish event sequence for feed ordering (no Date in runtime)
 
@@ -80,8 +103,8 @@ export const stats = from((state) => {
       allowed++;
     } else if (cls.category === "system") {
       system++; // permitted system path — benign, not an escape
-    } else if (cls.leaked) {
-      leaked++; // genuine escape that SUCCEEDED — a real leak (audit mode)
+    } else if (cls.reached) {
+      reached++; // out-of-bounds open the kernel allowed (audit / unconfined)
     } else {
       blocked++; // genuine escape the kernel refused — the jail working
     }
@@ -94,14 +117,14 @@ export const stats = from((state) => {
       cur.count++;
       cur.lastVerdict = cls.verdict;
       cur.sensitive = cls.sensitive;
-      cur.leaked = cls.leaked;
+      cur.reached = cls.reached;
       escapeMap.set(path, cur);
     }
 
     // Feed shows in-bounds + escapes; system noise is dropped so the stream
     // stays readable (it's counted in the header tally, just not streamed).
     if (cls.category !== "system") {
-      feed.unshift({ path, in_bounds: cls.inBounds, verdict: cls.verdict, sensitive: cls.sensitive, leaked: cls.leaked, ts: ts++ });
+      feed.unshift({ path, in_bounds: cls.inBounds, verdict: cls.verdict, sensitive: cls.sensitive, reached: cls.reached, ts: ts++ });
       if (feed.length > FEED) feed.pop();
     }
   });
@@ -117,7 +140,7 @@ export const stats = from((state) => {
       .sort((a, b) => b.count - a.count);
 
     state.set({
-      allowed, system, blocked, leaked, total, sensitiveHits,
+      allowed, system, blocked, reached, total, sensitiveHits,
       escapes,
       feed: feed.slice(),
       spark: spark.slice(),

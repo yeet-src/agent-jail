@@ -6,7 +6,7 @@ import { clipPath, lpad, pad, tildify } from "@/lib/format.js";
 
 const badge = (f) => {
   // Every badge is exactly 6 display columns so rows end at the same border.
-  if (f.leaked) return bold(fg(C.leak)("leaked"));
+  if (f.reached) return bold(fg(C.leak)("reachd"));
   const v = f.verdict;
   if (!v) return fg(C.faint)("     …");
   if (v.ok) return fg(C.safe)("    ok");

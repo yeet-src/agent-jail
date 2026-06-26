@@ -33,13 +33,26 @@ const SYSTEM_PREFIXES = [
 // O_PATH on "/usr") is benign traversal, not a reach at user data.
 const SYSTEM_DIRS = ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/dev", "/proc", "/sys", "/etc"];
 
+// Scratch/temp trees. A jailed process (and its toolchain) routinely touches
+// these for lockfiles, sockets, caches — they hold no user secrets, so an open
+// here is noise, not an escape. Without this, opening /tmp itself shows up as a
+// (succeeded) out-of-bounds reach, which read as a "leak" on a containment tool.
+const SCRATCH_PREFIXES = ["/tmp/", "/var/tmp/", "/run/", "/var/run/", "/dev/shm/"];
+const SCRATCH_DIRS = ["/tmp", "/var/tmp", "/run", "/var/run", "/dev/shm"];
+
 export function isSystemPath(path) {
   if (!path) return false;
   for (const pre of SYSTEM_PREFIXES) {
     if (path.indexOf(pre) === 0) return true;
   }
-  // A bare top-level system directory open (no trailing path) is benign too.
+  for (const pre of SCRATCH_PREFIXES) {
+    if (path.indexOf(pre) === 0) return true;
+  }
+  // A bare top-level system/scratch directory open (no trailing path) is benign.
   for (const d of SYSTEM_DIRS) {
+    if (path === d) return true;
+  }
+  for (const d of SCRATCH_DIRS) {
     if (path === d) return true;
   }
   return false;
@@ -97,13 +110,15 @@ export function verdictOf(ret) {
 }
 
 // Full classification used by the data layer. Three categories:
-//   category : "in" (under jailed dir), "system" (permitted system path —
-//              benign, de-emphasized), or "escape" (outside both — the story)
+//   category : "in" (under jailed dir), "system" (permitted system/scratch path
+//              — benign, de-emphasized), or "escape" (outside both — the story)
 //   inBounds : convenience: category === "in"
 //   isEscape : a genuine escape attempt (outside dir AND not a system path)
-//   leaked   : an ESCAPE that SUCCEEDED (fd >= 0) — what the jail prevents;
-//              seen in audit/--no-jail mode. System reads succeeding is normal,
-//              never a leak.
+//   reached  : an ESCAPE whose open SUCCEEDED (fd >= 0) — it got through. We say
+//              "reached", not "leaked": the open succeeded, but we don't claim
+//              the contents were exfiltrated (a directory/handle open succeeds
+//              too). Under a working jail this is 0; in audit/--no-jail it's the
+//              count of out-of-bounds opens that the kernel did NOT refuse.
 //   sensitive: escape hit a known high-value target (keys, creds, history)
 //   verdict  : { ok, label, errno } from the return value
 export function classify(path, inBounds, ret) {
@@ -115,6 +130,6 @@ export function classify(path, inBounds, ret) {
 
   const isEscape = category === "escape";
   const sensitive = isEscape && isSensitive(path);
-  const leaked = isEscape && verdict.ok; // genuine escape that succeeded
-  return { category, inBounds, isEscape, leaked, sensitive, verdict };
+  const reached = isEscape && verdict.ok; // out-of-bounds open that succeeded
+  return { category, inBounds, isEscape, reached, sensitive, verdict };
 }

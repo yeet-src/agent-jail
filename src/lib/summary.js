@@ -11,29 +11,29 @@ export function buildSummary(s, { dir, mode, home }) {
   lines.push(
     `opens: ${s.total}  ·  in-bounds: ${s.allowed}  ·  ` +
       `escapes blocked: ${s.blocked}` +
-      (s.leaked ? `  ·  LEAKED: ${s.leaked}` : ""),
+      (s.reached ? `  ·  REACHED (got through): ${s.reached}` : ""),
   );
 
   const sensitive = s.escapes.filter((e) => e.sensitive);
   if (sensitive.length) {
     lines.push(`sensitive targets reached for (${sensitive.length}):`);
     sensitive.slice(0, 8).forEach((e) => {
-      const verdict = e.leaked ? "LEAKED" : "blocked";
+      const verdict = e.reached ? "REACHED" : "blocked";
       lines.push(`  • ${tildify(e.path, home)}  ${e.count}×  [${verdict}]`);
     });
   } else if (s.escapes.length) {
     lines.push(`top escape targets:`);
     s.escapes.slice(0, 5).forEach((e) => {
-      const verdict = e.leaked ? "LEAKED" : "blocked";
+      const verdict = e.reached ? "REACHED" : "blocked";
       lines.push(`  • ${tildify(e.path, home)}  ${e.count}×  [${verdict}]`);
     });
   } else {
     lines.push(`no escape attempts — omp stayed in-bounds.`);
   }
 
-  if (jailed && s.blocked > 0 && s.leaked === 0) {
+  if (jailed && s.blocked > 0 && s.reached === 0) {
     lines.push(`verdict: jail held — every escape was refused by the kernel.`);
-  } else if (!jailed && (s.leaked > 0 || s.escapes.length)) {
+  } else if (!jailed && (s.reached > 0 || s.escapes.length)) {
     lines.push(`verdict: unconfined — these would have been blocked under --jail.`);
   }
   return lines.join("\n");

@@ -20,19 +20,29 @@
  *                               --home ABS          collapse to ~ in display
  *                               --comm NAME         process comm to match (omp)
  */
-import { Box, mount } from "yeet:tui";
-import { configure, stats } from "@/probes/fileaccess.js";
+import { Box, mount, signal } from "yeet:tui";
+import { configure, stats, watchEscapes } from "@/probes/fileaccess.js";
 import { layoutFor } from "@/lib/layout.js";
 import { buildSummary } from "@/lib/summary.js";
+import { startReporter } from "@/lib/report.js";
 import Header from "@/components/header.jsx";
 import Leaderboard from "@/components/leaderboard.jsx";
 import Feed from "@/components/feed.jsx";
 import Footer from "@/components/footer.jsx";
 
-const { dir = ".", mode = "jail", home = "", comm = "omp" } = yeet.args;
+const { dir = ".", mode = "jail", home = "", comm = "omp", headless, format } = yeet.args;
 
 // Push the jailed dir + comm into the kernel before we start classifying.
 configure(dir, comm);
+
+// Headless / background mode: no TUI, just structured reports of escape attempts
+// to stdout (pipe to a file or log shipper, or leave running detached). Skips
+// the screen entirely — never touches tty.*, which would throw without a PTY.
+if (headless) {
+  startReporter(watchEscapes, { dir, mode, format: format || "json" });
+  console.error(`agent-jail: headless ${mode} mode — reporting escape attempts for ${dir}`);
+  await new Promise(() => {}); // run until killed
+}
 
 // Copy a shareable session summary to the clipboard (OSC 52) and echo it.
 function copySummary() {
@@ -41,16 +51,36 @@ function copySummary() {
   console.log("\n" + text);
 }
 
+// Scroll offset into the escape-attempts list (the top pane). The leaderboard
+// shows a window starting here; it clamps internally, so we only need to keep a
+// non-negative number and let the view bound it. `pageRows` tracks the current
+// pane height so PgUp/PgDn move by a screenful.
+const scroll = signal(0);
+let pageRows = 10;
+const escapeCount = () => stats.get().escapes.length;
+const maxScroll = () => Math.max(0, escapeCount() - pageRows);
+const scrollBy = (d) => scroll.set(Math.max(0, Math.min(maxScroll(), scroll.get() + d)));
+
 tty.on("keydown", (e) => {
+  const code = e.code;
   const k = (e.key ?? "").toLowerCase();
-  if (e.code === "Escape" || k === "q") return yeet.exit();
-  if (k === "c") copySummary();
+  if (code === "Escape" || k === "q") return yeet.exit();
+  if (k === "c") return copySummary();
+  // Scroll the escape-attempts pane.
+  if (code === "ArrowUp" || k === "k") return scrollBy(-1);
+  if (code === "ArrowDown" || k === "j") return scrollBy(1);
+  if (code === "PageUp") return scrollBy(-pageRows);
+  if (code === "PageDown") return scrollBy(pageRows);
+  // g = top, G (shift+g) = bottom. Check the raw key for case.
+  if (e.key === "g") return scroll.set(0);
+  if (e.key === "G") return scroll.set(maxScroll());
 });
 
 const panel = (p) => {
   switch (p.kind) {
     case "leaderboard":
-      return <Leaderboard stats={stats} home={home} maxRows={p.maxRows} width={p.w} />;
+      pageRows = p.maxRows; // keep PgUp/PgDn in sync with the live pane height
+      return <Leaderboard stats={stats} home={home} maxRows={p.maxRows} width={p.w} scroll={scroll} />;
     case "feed":
       return <Feed stats={stats} home={home} maxRows={p.maxRows} width={p.w} />;
   }

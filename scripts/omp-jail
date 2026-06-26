@@ -26,6 +26,8 @@ PROBE_OBJ="$HERE/bin/probe.bpf.o"
 
 MODE=jail
 ALLOW_ARGS=""
+RUNTIME_ARGS=""
+HEADLESS=""
 DIR=""
 # Resolve omp to an absolute path now, while we still have the user's PATH.
 # The jail runs under sudo (for eBPF), whose PATH typically drops ~/.local/bin,
@@ -39,7 +41,9 @@ OMP_ARGS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --audit|--no-jail) MODE=audit; shift ;;
+    --headless|--background) HEADLESS=1; shift ;;
     --allow) ALLOW_ARGS="$ALLOW_ARGS --allow $2"; shift 2 ;;
+    --runtime) RUNTIME_ARGS="$RUNTIME_ARGS --runtime $2"; shift 2 ;;
     --) shift; OMP_ARGS="$*"; break ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     -*) echo "omp-jail: unknown flag $1" >&2; exit 2 ;;
@@ -60,7 +64,7 @@ HOME_ABS=${HOME:-}
 if [ "$MODE" = audit ]; then
   LAUNCH="$JAIL_BIN --no-jail $DIR -- $OMP $OMP_ARGS"
 else
-  LAUNCH="$JAIL_BIN $ALLOW_ARGS $DIR -- $OMP $OMP_ARGS"
+  LAUNCH="$JAIL_BIN $ALLOW_ARGS $RUNTIME_ARGS $DIR -- $OMP $OMP_ARGS"
 fi
 
 echo "omp-jail: $MODE — dir $DIR"
@@ -76,9 +80,16 @@ echo "omp-jail: launching watcher (needs root for eBPF); omp starts underneath."
 # keyboard. Its PID is recorded so we can stop it when the watcher quits.
 ( eval "$LAUNCH" >/dev/null 2>&1 & echo $! > "$HERE/.omp.pid" ) || true
 
-# Foreground: the yeet watcher. It exits on 'q'; we then clean up omp.
-yeet run "$HERE" -- \
-  --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp || true
+# Foreground: the yeet watcher. With --headless it prints structured reports of
+# escape attempts instead of a TUI (good for background runs / log shipping);
+# otherwise it's the interactive dashboard, exiting on 'q'.
+if [ -n "$HEADLESS" ]; then
+  yeet run "$HERE" -- \
+    --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp --headless || true
+else
+  yeet run "$HERE" -- \
+    --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp || true
+fi
 
 # Watcher quit — stop the jailed omp if it's still running.
 if [ -f "$HERE/.omp.pid" ]; then

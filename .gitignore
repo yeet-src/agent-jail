@@ -7,3 +7,6 @@
 /bin/*
 !/bin/.gitkeep
 /src/bpf/include/vmlinux.h
+
+# kernel-matrix run output (build/kernel-matrix.sh)
+/.kmatrix/

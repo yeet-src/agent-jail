@@ -68,13 +68,17 @@ struct {
 struct file_event *_unused_event __attribute__((unused));
 
 // System/scratch path prefixes a jailed program may read even though they're
-// outside the project dir: loader, libraries, pseudo-fs, temp. Mirrors the
-// Landlock launcher's allow-list and the JS classifier. Without these, a jailed
-// program can't even load libc.
-#define N_SYS 11
-static const char sys_prefixes[N_SYS][12] = {
+// outside the project dir: loader, libraries, locale, pseudo-fs, temp. Mirrors
+// the JS classifier's SYSTEM_PREFIXES. Without these, a jailed program can't
+// load libc, and benign locale/loader reads (e.g. /etc/locale.alias that `cat`
+// does) clutter the escape leaderboard instead of being filed as "system".
+// Width is 18 to fit the longest prefix; keep entries <= 17 chars + NUL.
+#define N_SYS 12
+#define SYS_W 16
+static const char sys_prefixes[N_SYS][SYS_W] = {
 	"/usr/", "/lib/", "/lib64/", "/bin/", "/sbin/",
-	"/etc/ld.so", "/dev/", "/proc/", "/sys/", "/tmp/", "/run/",
+	"/etc/ld.so", "/etc/locale", "/etc/localtime",
+	"/dev/", "/proc/", "/sys/", "/tmp/",
 };
 
 // Does `path` start with `pfx` (a NUL-terminated literal, at most `cap` bytes)?
@@ -126,7 +130,7 @@ static __always_inline int is_system_path(const char *path)
 		return 0; // a sensitive /proc read is an escape, not benign system access
 #pragma unroll
 	for (int s = 0; s < N_SYS; s++) {
-		if (has_prefix(path, sys_prefixes[s], 12))
+		if (has_prefix(path, sys_prefixes[s], SYS_W))
 			return 1;
 	}
 	return 0;
@@ -218,8 +222,9 @@ int BPF_PROG(on_file_open, struct file *file, int ret)
 	int system = !in_bounds && is_system_path(path);
 	int escape = !in_bounds && !system;
 
-	// Emit the decision for the dashboard (skip benign system noise so the
-	// stream and leaderboard stay about real reaches).
+	// Emit the decision for the dashboard. Benign system/locale/loader reads are
+	// skipped entirely (not counted, not streamed) so the leaderboard and feed
+	// stay about real reaches; the allow-list above is what keeps them off here.
 	if (!system) {
 		struct file_event *out = bpf_ringbuf_reserve(&events, sizeof(*out), 0);
 		if (out) {

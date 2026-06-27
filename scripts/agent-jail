@@ -1,97 +1,71 @@
 #!/bin/sh
-# agent-jail — confine omp to one directory (Landlock) and watch it live (eBPF).
+# agent-jail — confine omp to one directory and watch it live, both in eBPF.
 #
-# One command, two halves working together:
-#   1. the yeet watcher (this project) attaches via eBPF, shows every file omp
-#      opens, flags escapes, and proves the jail held;
-#   2. the C Landlock launcher (bin/agent-jail-bin) locks omp to the directory and
-#      execs it.
+# One command, one mechanism: a BPF program on the lsm/file_open hook BOTH
+# blocks out-of-bounds opens (-EPERM) and streams every decision to the live
+# dashboard. There is no separate Landlock launcher; enforcement and
+# observation are the same kernel program.
 #
 # Usage:
-#   agent-jail [DIR] [-- omp-args...]      jail omp in DIR (default: cwd)
-#   agent-jail --audit [DIR]               run UNCONFINED, watch what would leak
-#   agent-jail --allow PATH [DIR]          also permit PATH (repeatable)
+#   agent-jail [DIR] [-- omp-args...]   jail omp in DIR (default: cwd)
+#   agent-jail --audit [DIR]            run UNCONFINED, watch what would escape
+#   agent-jail --headless [DIR]         no TUI, stream escape reports to stdout
 #
-# The watcher runs in the foreground (it owns the TUI); omp runs underneath it.
-# Quit the watcher with q. omp keeps running until you exit it normally; the
-# watcher prints a copyable summary on quit.
+# How it scopes: the LSM program enforces on any process whose comm is "omp"
+# (and its children, tracked across fork) confined to DIR. The watcher loads the
+# program and patches DIR before omp starts, so omp is jailed from its first
+# open. Quit the watcher with q.
 #
-# Requires: Linux >= 5.13 with Landlock, a BTF kernel for eBPF, root for the
-# probe (the watcher loads BPF). On macOS, run inside the Lima VM.
+# Requires: Linux with CONFIG_BPF_LSM=y and `bpf` in the active LSM list, a BTF
+# kernel, and root for the BPF load. On macOS, run inside the Lima VM.
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-JAIL_BIN="$HERE/bin/agent-jail-bin"
 PROBE_OBJ="$HERE/bin/probe.bpf.o"
 
 MODE=jail
-ALLOW_ARGS=""
-RUNTIME_ARGS=""
 HEADLESS=""
 DIR=""
-# Resolve omp to an absolute path now, while we still have the user's PATH.
-# The jail runs under sudo (for eBPF), whose PATH typically drops ~/.local/bin,
-# so a bare "omp" wouldn't be found post-elevation. command -v honours PATH and
-# the OMP override.
 OMP_NAME=${OMP:-omp}
 OMP=$(command -v "$OMP_NAME" 2>/dev/null || echo "$OMP_NAME")
 
-# --- parse our flags; everything after -- is passed to omp ---
+# --- parse flags; everything after -- goes to omp ---
 OMP_ARGS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --audit|--no-jail) MODE=audit; shift ;;
     --headless|--background) HEADLESS=1; shift ;;
-    --allow) ALLOW_ARGS="$ALLOW_ARGS --allow $2"; shift 2 ;;
-    --runtime) RUNTIME_ARGS="$RUNTIME_ARGS --runtime $2"; shift 2 ;;
     --) shift; OMP_ARGS="$*"; break ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     -*) echo "agent-jail: unknown flag $1" >&2; exit 2 ;;
     *) if [ -z "$DIR" ]; then DIR="$1"; shift; else OMP_ARGS="$*"; break; fi ;;
   esac
 done
 [ -n "$DIR" ] || DIR=$(pwd)
-
-# Canonicalize so the watcher's prefix matches the jail's exactly.
-DIR=$(CDPATH= cd -- "$DIR" && pwd)
+DIR=$(CDPATH= cd -- "$DIR" && pwd) # canonical, so the kernel prefix matches
 HOME_ABS=${HOME:-}
 
-[ -f "$JAIL_BIN" ]  || { echo "agent-jail: $JAIL_BIN missing — run 'make' first" >&2; exit 1; }
 [ -f "$PROBE_OBJ" ] || { echo "agent-jail: $PROBE_OBJ missing — run 'make' first" >&2; exit 1; }
 
-# The launcher is what actually runs omp. In audit mode it skips Landlock so the
-# watcher can show what WOULD leak.
-if [ "$MODE" = audit ]; then
-  LAUNCH="$JAIL_BIN --no-jail $DIR -- $OMP $OMP_ARGS"
-else
-  LAUNCH="$JAIL_BIN $ALLOW_ARGS $RUNTIME_ARGS $DIR -- $OMP $OMP_ARGS"
-fi
-
 echo "agent-jail: $MODE — dir $DIR"
-echo "agent-jail: launching watcher (needs root for eBPF); omp starts underneath."
+echo "agent-jail: loading the eBPF jail (needs root); omp starts once it's live."
 
-# The watcher (yeet) can't spawn processes itself, so the wrapper starts omp
-# jailed in the background and runs the watcher in the foreground, filtering on
-# comm=omp under DIR. The BPF attaches as the watcher starts; a few of omp's
-# very first startup opens may land before then — fine for an interactive
-# agent, where the opens that matter happen during use, not in the first ms.
-#
-# Background omp, detached from the TUI's stdin so the watcher keeps the
-# keyboard. Its PID is recorded so we can stop it when the watcher quits.
-( eval "$LAUNCH" >/dev/null 2>&1 & echo $! > "$HERE/.omp.pid" ) || true
+# Start omp slightly after the watcher, so the LSM program is attached and DIR
+# is patched before omp's first open. The watcher owns the foreground (TUI or
+# headless stream); omp runs in the background, its PID recorded for teardown.
+( sleep 2; eval "exec $OMP $OMP_ARGS" >/dev/null 2>&1 & echo $! > "$HERE/.omp.pid" ) &
 
-# Foreground: the yeet watcher. With --headless it prints structured reports of
-# escape attempts instead of a TUI (good for background runs / log shipping);
-# otherwise it's the interactive dashboard, exiting on 'q'.
+# Foreground: the watcher. It loads probe.bpf.o (the LSM jail), patches DIR +
+# comm + mode, and either renders the dashboard or streams headless reports. In
+# audit mode the program emits decisions but never returns -EPERM, so you see
+# what WOULD be blocked with the jail effectively off.
 if [ -n "$HEADLESS" ]; then
-  yeet run "$HERE" -- \
-    --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp --headless || true
+  yeet run "$HERE" -- --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp --headless || true
 else
-  yeet run "$HERE" -- \
-    --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp || true
+  yeet run "$HERE" -- --dir "$DIR" --mode "$MODE" --home "$HOME_ABS" --comm omp || true
 fi
 
-# Watcher quit — stop the jailed omp if it's still running.
+# Watcher quit — stop omp if it's still running.
 if [ -f "$HERE/.omp.pid" ]; then
   OMP_PID=$(cat "$HERE/.omp.pid" 2>/dev/null || true)
   [ -n "${OMP_PID:-}" ] && kill "$OMP_PID" 2>/dev/null || true

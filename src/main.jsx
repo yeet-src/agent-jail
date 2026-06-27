@@ -33,7 +33,7 @@ import Footer from "@/components/footer.jsx";
 const { dir = ".", mode = "jail", home = "", comm = "omp", headless, format } = yeet.args;
 
 // Push the jailed dir + comm into the kernel before we start classifying.
-configure(dir, comm);
+configure(dir, comm, mode === "audit");
 
 // Headless / background mode: no TUI, just structured reports of escape attempts
 // to stdout (pipe to a file or log shipper, or leave running detached). Skips

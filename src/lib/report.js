@@ -17,9 +17,10 @@ export function reportRecord(ev, { dir, mode }) {
     event: "escape_attempt",
     path: ev.path,
     by: ev.comm,
-    outcome: ev.reached ? "reached" : "blocked", // reached = open succeeded
+    // The LSM hook decided this: blocked = it returned -EPERM. In audit mode
+    // (jail off) the same reach gets through, so blocked is false = "reached".
+    outcome: ev.blocked ? "blocked" : "reached",
     sensitive: ev.sensitive,
-    verdict: ev.verdict.label,
     dir,
     mode,
   };

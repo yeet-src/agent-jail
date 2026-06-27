@@ -1,4 +1,13 @@
-# `agent-jail`
+# `agent-jail` — LSM-BPF branch
+
+> [!CAUTION]
+> **You are on the `lsm-enforcement` branch.** This variant enforces with an
+> eBPF **LSM program** (`lsm/file_open`) instead of Landlock: one BPF program
+> both blocks out-of-bounds opens and feeds the dashboard. It needs a kernel
+> with **`CONFIG_BPF_LSM=y` and `bpf` in the active LSM list** (narrower support
+> than Landlock's 5.13+). The default branch (`main`) is the Landlock build and
+> is the one to use unless you specifically want the eBPF-enforcement variant.
+> Same UI, same behavior; different enforcement backend. Experimental.
 
 > **A cell for your coding agent.** The kernel decides what it can touch, and you watch it try.
 

@@ -14,6 +14,13 @@
 
 **`agent-jail` confines a coding agent (`omp`) and every process it spawns to one directory with the Linux Landlock LSM, and shows each file it opens, live, over eBPF.**
 
+> [!NOTE]
+> Enforcement here is **Landlock** (a small C launcher + an eBPF watcher), which
+> works on any Linux 5.13+ with Landlock enabled. If your kernel has the BPF LSM
+> (`CONFIG_BPF_LSM=y`), the sibling
+> [`agent-lock`](https://github.com/yeet-src/agent-lock) does the same job with a
+> single eBPF program (no launcher). Same UI; pick by what your kernel supports.
+
 > [!TIP]
 > The enforcement and the watching are two separate kernel mechanisms aimed at the same process. Landlock applies the cage before the agent starts, so the restriction is inherited across `exec` and cannot be lifted from inside. eBPF reads every open and its return value, so you see the verdict the kernel actually returned, not a guess.
 

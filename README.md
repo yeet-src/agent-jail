@@ -1,13 +1,13 @@
-# `agent-jail` — LSM-BPF branch
+# `agent-jail` (LSM-BPF branch)
 
 > [!CAUTION]
-> **You are on the `lsm-enforcement` branch.** This variant enforces with an
-> eBPF **LSM program** (`lsm/file_open`) instead of Landlock: one BPF program
-> both blocks out-of-bounds opens and feeds the dashboard. It needs a kernel
-> with **`CONFIG_BPF_LSM=y` and `bpf` in the active LSM list** (narrower support
-> than Landlock's 5.13+). The default branch (`main`) is the Landlock build and
-> is the one to use unless you specifically want the eBPF-enforcement variant.
-> Same UI, same behavior; different enforcement backend. Experimental.
+> **You are on the `lsm-enforcement` branch.** This variant enforces entirely in
+> eBPF: a single **BPF LSM program** on `lsm/file_open` both blocks
+> out-of-bounds opens and feeds the dashboard. There is no Landlock launcher. It
+> needs a kernel with **`CONFIG_BPF_LSM=y` and `bpf` in the active LSM list**
+> (`/sys/kernel/security/lsm`), which is narrower support than the Landlock build
+> on `main` (Linux 5.13+). Use `main` unless you specifically want the
+> single-eBPF-program enforcement. Same UI; different enforcement backend.
 
 > **A cell for your coding agent.** The kernel decides what it can touch, and you watch it try.
 
@@ -21,10 +21,10 @@
 
 ![agent-jail live demo: an agent works inside its project while reaches at ~/.ssh, ~/.aws, and /etc/passwd climb the escape leaderboard, every one blocked](assets/agent-jail.gif)
 
-**`agent-jail` confines a coding agent (`omp`) and every process it spawns to one directory with the Linux Landlock LSM, and shows each file it opens, live, over eBPF.**
+**`agent-jail` confines a coding agent (`omp`) and every process it spawns to one directory with an eBPF LSM program, and shows each file it opens, live.**
 
 > [!TIP]
-> The enforcement and the watching are two separate kernel mechanisms aimed at the same process. Landlock applies the cage before the agent starts, so the restriction is inherited across `exec` and cannot be lifted from inside. eBPF reads every open and its return value, so you see the verdict the kernel actually returned, not a guess.
+> One BPF program does both jobs. On the `lsm/file_open` hook it sees the file the agent is opening, decides whether the path is inside the jailed directory, and returns `-EPERM` to refuse it if not. The same hook emits the decision to a ring buffer the dashboard reads, so enforcement and observation are the same kernel code, not two mechanisms kept in sync.
 
 > [!WARNING]
 > **Experimental (v0.x).** The confinement holds against a breakout self-test at zero leaks, but it has only been verified on one kernel and architecture (Linux 6.12, arm64, Debian 13) against a shell stand-in, not against real `omp` across the environments people run. Treat it as a layer to evaluate and harden, not a sole barrier you bet secrets on.
@@ -33,31 +33,31 @@
 
 ```sh
 curl -fsSL https://yeet.cx | sh
-git clone https://github.com/yeet-src/agent-jail.git && cd agent-jail
-make                                  # builds the BPF object, the launcher, and the JS bundle
+git clone -b lsm-enforcement https://github.com/yeet-src/agent-jail.git && cd agent-jail
+make                                  # builds the BPF object and the JS bundle
 sudo ./scripts/agent-jail ~/project   # jail omp in ~/project and watch it live
 ```
 <sub>[Manual install guide](https://yeet.cx/docs/install/manual-installation) | Linux only</sub>
 
-`agent-jail` carries a compiled launcher and a wrapper script, so it builds from source rather than running straight from a remote `yeet run`. The dashboard runs in your terminal with `omp` jailed underneath it. `↑` / `↓` moves the highlighted row in the escape list, `c` copies a session summary, `q` quits. `--headless` drops the TUI and streams escape reports for a background run.
+The dashboard runs in your terminal with `omp` jailed underneath it. `↑` / `↓` moves the highlighted row in the escape list, `c` copies a session summary, `q` quits. `--audit` runs the agent unconfined and shows what it would have reached for; `--headless` drops the TUI and streams escape reports for a background run.
 
-## A 60-second primer on jailing a process
+## A 60-second primer on jailing a process with eBPF
 
-A coding agent runs with your user's full filesystem access, and it decides what to read on its own. Confining it means letting the kernel, not the agent, decide which paths are reachable. Two kernel features do the work.
+A coding agent runs with your user's full filesystem access, and it decides what to read on its own. Confining it means letting the kernel, not the agent, decide which paths are reachable.
 
 | Term | What it means here |
 |---|---|
-| **Landlock** | A Linux Security Module, mainline since 5.13, that lets an unprivileged process drop its own filesystem access. No root, no container, no namespaces. |
-| **ruleset** | The set of paths the jailed process keeps: read and write under the project directory, read-only on the system paths a program needs to start. Everything else is denied. |
-| **inherited restriction** | The ruleset is applied before `omp` starts and survives `exec`, so every child it spawns (`git`, `node`, `cat`) is bound by it too, and none of them can undo it. |
-| **escape attempt** | An open of a path outside the project directory. The kernel refuses it; the watcher records it with the kernel's error code. |
-| **reached** | An out-of-bounds open that succeeded. Under a working jail this stays zero; you see it only in `--audit` mode, which runs the agent unconfined. |
+| **LSM** | Linux Security Module, a kernel framework with allow/deny hooks at security-sensitive moments (a file open, a connect, an exec). SELinux, AppArmor, and Landlock are all LSMs. |
+| **BPF LSM** | An LSM that lets you attach an **eBPF program** to those hooks instead of configuring a fixed module. The program returns 0 to allow or a negative errno to deny. Needs `CONFIG_BPF_LSM=y`. |
+| **`lsm/file_open`** | The hook this tool attaches to. It runs on every file open, with the kernel's `struct file`, before the descriptor is handed back. |
+| **jailed set** | The processes under enforcement: the agent plus every child it forks. Enrollment propagates at fork, so the whole tree is covered. |
+| **escape attempt** | An open of a path outside the project directory by a jailed process. The program returns `-EPERM`; the dashboard records it. |
 
-The reason a path filter built this way holds: Landlock checks the resolved inode, not the path string you passed. A `../../etc/passwd`, a symlink pointing out of the directory, and the `/proc/self/root` re-entry trick all resolve to the same forbidden file, and all three are refused.
+The reason this holds where a naive path filter would not: the hook reads the file's resolved path with `bpf_d_path`, the real target after the kernel walks symlinks and `..`. So `../../etc/passwd`, a symlink pointing out of the directory, and the `/proc/self/root` re-entry trick all resolve to the same forbidden file, and all three are refused.
 
 ## Common use cases
 
-Developers running an AI coding agent on a real codebase, and anyone auditing what an agent does to the filesystem before trusting it. Where you'd otherwise wrap the agent in a container or a VM to keep it away from `~/.ssh`, `agent-jail` applies a kernel ruleset to the process directly, with no image to build and no guest to boot.
+Developers running an AI coding agent on a real codebase, and anyone auditing what an agent does to the filesystem before trusting it. Where you'd otherwise wrap the agent in a container or a VM to keep it away from `~/.ssh`, `agent-jail` attaches a kernel hook to the process directly, with no image to build and no guest to boot.
 
 - Running `omp` on a work repo. Will it stay out of `~/.ssh` and `~/.aws`?
 - Evaluating a new agent. What does it reach for outside the project?
@@ -68,40 +68,38 @@ Developers running an AI coding agent on a real codebase, and anyone auditing wh
 
 A status masthead on top, two framed panels, and a key-hint footer.
 
-**Masthead.** The jail state (`JAILED` or `AUDIT`), the directory, a one-line verdict (`37 escape attempts blocked`), and a bar splitting every open into in-bounds, system, blocked, and reached, with a live access-rate sparkline. The split is the proof: in-bounds work and blocked escapes are counted from the same stream.
+**Masthead.** The jail state (`JAILED` or `AUDIT`), the directory, a one-line verdict (`37 escape attempts blocked`), and a bar splitting opens into in-bounds and blocked, with a live access-rate sparkline. The split is the proof: in-bounds work and blocked escapes are counted from the same hook.
 
-**Escape attempts.** The paths `omp` reached for outside the directory, ranked by how often. Sensitive targets (keys, credentials, shell history) are flagged with a 🔥. The badge on the right is the kernel's verdict: `blocked` means the open was refused, `reached` means it got through (which only happens in audit mode). `↑` / `↓` moves a highlighted cursor down the list as it grows.
+**Escape attempts.** The paths `omp` reached for outside the directory, ranked by how often. Sensitive targets (keys, credentials, shell history) are flagged with a 🔥. The badge on the right is the hook's verdict: `blocked` means the open was refused. `↑` / `↓` moves a highlighted cursor down the list as it grows.
 
-**Live opens.** The stream of recent opens as they happen: in-bounds work in green, interleaved with the occasional blocked escape, each attributed to the child process that made the call (`cat`, `git`, `grep`), since the jail covers the whole process tree.
+**Live opens.** The stream of recent opens as they happen: in-bounds work in green, interleaved with the occasional blocked escape, each attributed to the process that made the call (`omp`, or a child like `cat` or `git`), since the jail covers the whole process tree.
 
-Benign system and scratch reads (`/usr`, `/lib`, `/tmp`) are counted as "system" and kept off the escape list, so a real reach at your data is not buried under library and locale lookups.
+Benign system and scratch reads (`/usr`, `/lib`, `/tmp`, the loader and locale files) are treated as permitted and kept off the escape list, so a real reach at your data is not buried under library lookups.
 
 ## How it works
 
-The launcher enforces; the eBPF programs observe. They share nothing but the process they are aimed at.
+One BPF object, one LSM program that enforces and observes, plus two scheduler tracepoints that track which processes are jailed.
 
-**The launcher** (`src/jail/agent-jail.c`). A dependency-free C program that calls three Landlock syscalls (`landlock_create_ruleset`, `landlock_add_rule`, `landlock_restrict_self`), then `execve`s the target. It grants read and write under the project directory, read-only on the system directories a program needs to run, the specific `/etc` loader files, and the command's own binary, then locks itself before exec. It also strips environment variables whose names look secret-bearing (`KEY`, `TOKEN`, `SECRET`, `AWS_`, and similar), because Landlock cannot stop a process reading its own environment.
+**The enforcer + emitter** (`src/bpf/jail.bpf.c`, `lsm/file_open`). For each open by a jailed process it resolves the path with `bpf_d_path`, classifies it as in-bounds (under the jailed directory), system (a permitted loader/library/scratch path), or an escape, then returns `-EPERM` for an escape and `0` otherwise. The same call emits the decision (path, comm, blocked) into the ring buffer the dashboard reads. Benign system reads are allowed and not emitted, so they stay off the leaderboard.
 
-**The BPF side.** One object, four tracepoint programs, one ring buffer. Each open event carries the path, the return value, and the comm of the process that made it.
-
-| Program | Hook | Captures |
+| Program | Hook | Role |
 |---|---|---|
-| tracepoint | `sys_enter_openat` / `sys_exit_openat`, and the `openat2` pair | Every file open and the kernel's return value (the verdict) |
-| tracepoint | `sched_process_fork` | New children, recorded into the traced-process set |
-| tracepoint | `sched_process_exit` | Process exit, to drop it from the set |
+| LSM | `lsm/file_open` | Decide each open (`-EPERM` or allow) **and** emit it to the dashboard |
+| tracepoint | `sched_process_fork` | Copy jail membership to a new child, so the whole tree is covered |
+| tracepoint | `sched_process_exit` | Drop a process from the jailed set when it exits |
 
-A `traced` hash map seeded on `omp` and extended at each fork is how an open by a child like `cat` is attributed to the jailed tree rather than missed. The send path stages each path in a per-CPU scratch map and a per-thread `inflight` map, then emits one `file_event` struct into the ring buffer.
+**Scoping.** A `jailed` hash map holds the tgid of every jailed process. The program self-enrolls a process whose `comm` matches the configured target (default `omp`) on its first open, reading the jailed directory from a `.data` knob the watcher patches at startup; `sched_process_fork` then propagates membership to children. So a `cat` the agent shells out to is covered even though its comm is not `omp`.
 
 **The JS side.**
 
-- `src/probes/` is the only BPF-aware code. It loads the object, subscribes to the ring buffer once, and rolls the stream into reactive signals.
-- `src/components/` and `src/lib/` are pure presentation reading those signals: the masthead, the two panels, the path classifier, the theme.
+- `src/probes/` is the only BPF-aware code. It loads the object, patches the jailed directory and comm into `.data`, subscribes to the ring buffer once, and rolls the stream into reactive signals.
+- `src/components/` and `src/lib/` are pure presentation reading those signals: the masthead, the two panels, the sensitive-path classifier, the theme.
 - `src/main.jsx` wires them together and owns keyboard input.
 
 ## Requirements
 
 > [!IMPORTANT]
-> A kernel with Landlock enabled (`CONFIG_SECURITY_LANDLOCK=y`) for the jail, and BTF (`CONFIG_DEBUG_INFO_BTF=y`) for the eBPF watcher. Both are on by default on current Ubuntu, Debian, and Fedora. Landlock is mainline from kernel 5.13.
+> A kernel with the BPF LSM enabled: **`CONFIG_BPF_LSM=y`** and `bpf` present in `/sys/kernel/security/lsm` (the active LSM list, set at boot via `lsm=`). Plus BTF (`CONFIG_DEBUG_INFO_BTF=y`) for CO-RE. These are common on recent kernels but not universal; the Landlock build on `main` has broader reach if your kernel lacks BPF LSM.
 
 The yeet daemon, which handles the privileged BPF load. `curl -fsSL https://yeet.cx | sh` installs it.
 
@@ -110,42 +108,43 @@ The yeet daemon, which handles the privileged BPF load. `curl -fsSL https://yeet
 > [!NOTE]
 > What `agent-jail` does not do, and where it is unproven.
 
-- It confines the filesystem, not the network. Landlock governs files, not sockets, so the agent's calls to model APIs keep working and network exfiltration is not prevented. For that, pair it with a network namespace or firewall.
-- It is verified on one kernel and architecture against a shell stand-in, not against real `omp` across distros and kernel versions. The Landlock ABI gained rights across 5.13 to 6.x, so an older kernel grants a narrower ruleset.
-- `--best-effort` runs the agent unconfined when Landlock is unavailable. That is deliberate, so a missing LSM does not silently break the run, but it means no protection on that host. Without the flag the launcher refuses rather than give false safety.
-- Environment secrets are scrubbed by name before exec, so a secret passed under an unrecognised variable name still reaches the agent. Prefer giving a jailed agent its key through a config file inside the directory.
-- It reads paths and the kernel's verdict, not file contents. It tells you what was reached for, not what was in it.
+- It confines the filesystem, not the network. The hook governs file opens, not sockets, so the agent's calls to model APIs keep working and network exfiltration is not prevented. For that, pair it with a network namespace or firewall.
+- It is verified on one kernel and architecture against a shell stand-in, not against real `omp` across distros and kernel versions.
+- It needs BPF LSM (`CONFIG_BPF_LSM=y` + `bpf` in the active LSM list). On a kernel without it the program will not attach. There is no unconfined fallback on this branch; it fails to load rather than run unprotected.
+- A few of the agent's very first opens can happen before the program self-enrolls it (the enrollment fires on its first open). For an interactive agent the reaches that matter happen during use, not in the first millisecond.
+- It reads paths and the hook's verdict, not file contents. It tells you what was reached for, not what was in it.
 
 ## Community questions
 
 **Do I need a container or a VM?**
-No. `agent-jail` applies a Landlock ruleset to the process itself, with no image and no guest OS. The agent runs as a normal process that happens to wake up already confined.
+No. `agent-jail` attaches a kernel hook to the process itself, with no image and no guest OS. The agent runs as a normal process whose file opens are checked in-kernel.
 
 **Will the jail break the tools `omp` runs?**
-Tools that stay inside the project work normally. A child that reaches outside (a `git` reading `~/.gitconfig`, say) is refused like any other escape, because the ruleset is inherited across `exec`. Grant an extra path with `--allow` if a tool legitimately needs one.
+Tools that stay inside the project work normally. A child that reaches outside (a `git` reading `~/.gitconfig`, say) is refused like any other escape, because jail membership is inherited at fork. The system allow-list keeps loader, library, and locale reads working so programs can still start.
 
 **Why don't I see any escape attempts?**
-Because a working jail produces none beyond startup, and the watcher hides benign system and scratch reads. Run `--audit` to see what the agent reaches for with the jail off.
+Because a working jail produces none beyond startup, and the program does not emit benign system reads. Run `--audit` to see what the agent reaches for with enforcement off.
 
 **Is it safe to run against real work?**
-The enforcement is the Landlock kernel API, and the watcher is passive. It reads file paths and verdicts, so treat its output like any tool that can see filesystem metadata. It is experimental, so do not rely on it as your only barrier yet.
+Enforcement is a kernel LSM hook and the dashboard is passive. It reads file paths and verdicts, so treat its output like any tool that can see filesystem metadata. It is experimental, so do not rely on it as your only barrier yet.
 
 **How is this different from running the agent in Docker?**
-A container isolates with namespaces and a separate filesystem view; `agent-jail` leaves the agent in your filesystem and lets the kernel refuse the paths outside one directory. No image build, no volume mounts, and the eBPF view shows you each refusal as it happens.
+A container isolates with namespaces and a separate filesystem view; `agent-jail` leaves the agent in your filesystem and lets a kernel hook refuse the paths outside one directory. No image build, no volume mounts, and the same hook that blocks also shows you each refusal as it happens.
 
 ## Building from source
 
 ```sh
-make            # clang + bpftool build the BPF object, cc builds the launcher, esbuild bundles the JS
-make adversary  # build, then run the breakout self-test (must report 0 leaks)
+make            # bpftool links the BPF object, esbuild bundles the JS (both from the vendored toolchain)
+make veristat   # load the object with veristat to confirm the verifier accepts every program
+make adversary  # build, then run the LSM jail-breakout self-test (must report 0 leaks)
 make clean
 ```
 
-Needs `clang`, `bpftool`, and a C compiler for the BPF object and the launcher, plus `node` and `npm` for the bundle step. The compiled BPF object, the launcher binary, and the bundled JS are gitignored; `make` regenerates them.
+The build uses the pinned static toolchain (clang, bpftool, esbuild) resolved by `build/toolchain.mk` from a shared per-machine cache, so it needs no system C/BPF toolchain; `make toolchain` fills the cache on first build. The compiled BPF object and the bundled JS are gitignored; `make` regenerates them.
 
 ## License
 
-The BPF program declares `SEC("license") = "Dual BSD/GPL"`, required because it uses GPL-only kernel helpers. No repository-wide LICENSE file is present.
+The BPF program declares `SEC("license") = "GPL"`, required because BPF LSM programs use GPL-only kernel helpers. No repository-wide LICENSE file is present.
 
 ---
 
